@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>ESPRESSGO B2B Wholesale Portal</title>
+  <meta name="description" content="ESPRESSGO B2B Wholesale Portal — gel-based espresso shots for business."/>
+  <script src="shared.js"></script>
+  <script>
+    // Redirect on load
+    if (typeof Auth !== 'undefined' && Auth.isLoggedIn()) {
+      window.location.href = 'catalog.html';
+    } else {
+      window.location.href = 'about.html';
+    }
+  </script>
+</head>
+<body>
+  <p>Redirecting…</p>
+</body>
+</html>

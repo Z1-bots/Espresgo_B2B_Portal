@@ -1,0 +1,70 @@
+/* ============================================================
+   admin-dashboard.css — Styles for admin/admin-dashboard.html
+   Depends on: ../shared.css (must be loaded first)
+   ============================================================ */
+
+/* ── Overall layout: sidebar + main content ──────────────── */
+.admin-layout { display: flex; min-height: 100vh; }
+
+/* ── Left sidebar navigation ─────────────────────────────── */
+.admin-sidebar {
+  width: 220px;
+  background: var(--brown);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+.sidebar-logo      { display: flex; align-items: center; gap: .75rem; padding: .5rem 1.25rem 1.5rem; }
+.sidebar-logo-icon { width: 36px; height: 36px; background: var(--amber); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px; }
+.sidebar-logo-text { color: var(--cream); font-size: 13px; letter-spacing: .12em; }
+.sidebar-logo-sub  { color: var(--brown-lt); font-size: 9px; text-transform: uppercase; letter-spacing: .1em; }
+.sidebar-nav       { flex: 1; padding: 0 .75rem; }
+.sidebar-link {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .65rem .85rem; border-radius: 10px;
+  font-size: 13px; color: #9B8575; margin-bottom: 2px;
+  transition: all .15s; cursor: pointer; border: none; background: none; width: 100%; text-align: left;
+}
+.sidebar-link:hover  { color: var(--cream); background: rgba(255,255,255,.08); }
+.sidebar-link.active { color: var(--cream); background: rgba(255,255,255,.12); }
+.sidebar-footer  { padding: .75rem 1.25rem; border-top: 1px solid var(--brown-md); }
+.sidebar-logout  { display: flex; align-items: center; gap: .5rem; font-size: 12px; color: #9B8575; background: none; border: none; cursor: pointer; transition: color .15s; }
+.sidebar-logout:hover { color: #f87171; }
+
+/* ── Main content area ───────────────────────────────────── */
+.admin-main     { flex: 1; padding: 2rem; overflow-y: auto; }
+.admin-header   { margin-bottom: 1.75rem; }
+.admin-header h1 { font-size: 1.5rem; color: var(--brown); }
+.admin-header p  { font-size: 13px; color: var(--muted); margin-top: .2rem; }
+
+/* ── Summary stat cards (dashboard overview) ─────────────── */
+.stat-row       { display: grid; grid-template-columns: repeat(4,1fr); gap: 1rem; margin-bottom: 1.5rem; }
+.stat-mini      { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem 1.25rem; }
+.stat-mini-label { font-size: 11px; color: var(--muted); margin-bottom: .35rem; }
+.stat-mini-val   { font-size: 1.6rem; color: var(--brown); }
+.stat-mini-sub   { font-size: 11px; color: var(--muted-lt); margin-top: 2px; }
+
+/* ── Data tables (orders, users, products, feedback) ─────── */
+.data-table    { width: 100%; border-collapse: collapse; }
+.data-table th { text-align: left; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; padding: .75rem 1rem; border-bottom: 2px solid #F0EAE4; }
+.data-table td { padding: .8rem 1rem; border-bottom: 1px solid #F9F4F0; font-size: 13px; color: var(--brown-lt); vertical-align: middle; }
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: #FAF8F5; }
+
+/* Order/user status badge */
+.status-pill { display: inline-flex; align-items: center; gap: .3rem; font-size: 10px; padding: .2rem .55rem; border-radius: 9999px; border: 1px solid; white-space: nowrap; }
+
+/* Panel visibility — only the active panel is shown */
+.panel        { display: none; }
+.panel.active { display: block; }
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 800px) {
+  .admin-sidebar { display: none; }
+  .stat-row { grid-template-columns: repeat(2,1fr); }
+}
