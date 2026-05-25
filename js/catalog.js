@@ -31,69 +31,129 @@ function renderProductCard(product) {
   const nextTier     = product.tiers.find(t => qty < t.min);
 
   return `
-    <div class="product-card" role="listitem">
-      <div class="product-inner">
-        <!-- Coloured visual panel with pouch SVG -->
-        <div class="product-visual" style="background:linear-gradient(160deg,${product.pouchAccent}EE,${product.pouchColor}CC);">
-          <div style="position:absolute;top:.75rem;right:.75rem;width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.1);"></div>
-          ${pouchSVG(product, 105)}
-          <span class="stock-badge">✓ In Stock</span>
-        </div>
+  <div class="product-card" role="listitem">
 
-        <!-- Product info: name, specs, pricing tiers, quantity stepper -->
-        <div class="product-info">
-          <div class="product-header">
-            <div>
-              <div class="product-name">${product.name}</div>
-              <div class="product-sub">${product.subtitle}</div>
-            </div>
-            <span class="product-sku">${product.sku}</span>
-          </div>
+    <!-- Product image -->
+    <div class="product-image"
+      style="
+        background:linear-gradient(160deg,${product.pouchAccent}EE,${product.pouchColor}CC);
+      ">
+      ${pouchSVG(product, 130)}
+    </div>
 
-          <div class="specs">
-            ${[product.caffeine, product.format, product.shelfLife].map(s => `<span class="spec">${s}</span>`).join('')}
-          </div>
+    <!-- Product content -->
+    <div class="product-content">
 
-          <!-- Volume pricing tier grid -->
-          <div>
-            <p style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.5rem;">Volume Pricing — per carton of 50 pouches</p>
-            <div class="tier-grid">
-              ${product.tiers.map((tier, i) => {
-                const isActive = i === activeTierIdx && qty > 0;
-                const pct = i > 0 ? Math.round((1 - tier.price / product.tiers[0].price) * 100) : null;
-                return `<div class="tier-cell ${isActive ? 'active' : ''}">
-                  <div class="tier-price">$${tier.price}</div>
-                  <div class="tier-range">${tier.max ? `${tier.min}–${tier.max} ctn` : `${tier.min}+ ctn`}</div>
-                  ${pct ? `<div class="tier-pct">−${pct}%</div>` : ''}
-                </div>`;
-              }).join('')}
-            </div>
-          </div>
+      <!-- Name -->
+      <div class="product-name">
+        ${product.name}
+      </div>
 
-          <!-- Quantity stepper + subtotal badge -->
-          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;margin-top:auto;">
-            <div class="stepper">
-              <button class="stepper-btn" onclick="updateCart('${product.id}', ${Math.max(0, qty - 1)})" ${qty === 0 ? 'disabled' : ''} aria-label="Decrease quantity">−</button>
-              <input class="stepper-input" type="number" min="0" value="${qty || ''}" placeholder="0"
-                onchange="updateCart('${product.id}', Math.max(0, parseInt(this.value)||0))"
-                aria-label="Quantity in cartons for ${product.name}"/>
-              <button class="stepper-btn" onclick="updateCart('${product.id}', ${qty + 1})" aria-label="Increase quantity">+</button>
-            </div>
-            ${qty > 0 ? `
-              <div class="subtotal-badge">
-                <div class="subtotal-price">$${(activeTier.price * qty).toFixed(2)}</div>
-                <div class="subtotal-pouches">${qty * 50} pouches</div>
+      <!-- Price -->
+      <div class="product-price">
+        SGD $${product.tiers[0].price}
+        <span>/ carton</span>
+      </div>
+
+      <!-- Description -->
+      <div class="product-description">
+        ${product.subtitle}
+      </div>
+
+      <!-- Specs -->
+      <div class="specs">
+        ${[
+          product.caffeine,
+          product.format,
+          product.shelfLife
+        ].map(s => `<span class="spec">${s}</span>`).join('')}
+      </div>
+
+      <!-- Tier pricing -->
+      <div class="tier-section">
+        <p class="tier-title">
+          Volume Pricing
+        </p>
+
+        <div class="tier-grid">
+          ${product.tiers.map((tier, i) => {
+
+            const isActive =
+              i === activeTierIdx && qty > 0;
+
+            const pct =
+              i > 0
+                ? Math.round(
+                    (1 - tier.price / product.tiers[0].price) * 100
+                  )
+                : null;
+
+            return `
+              <div class="tier-cell ${isActive ? 'active' : ''}">
+                <div class="tier-price">
+                  SGD $${tier.price}
+                </div>
+
+                <div class="tier-range">
+                  ${tier.max
+                    ? `${tier.min}-${tier.max} ctn`
+                    : `${tier.min}+ ctn`}
+                </div>
+
+                ${pct
+                  ? `<div class="tier-pct">-${pct}%</div>`
+                  : ''}
               </div>
-            ` : ''}
-          </div>
-
-          <!-- Tier upgrade hint (shown when next tier is reachable) -->
-          ${nextTier && qty > 0 ? `
-            <div class="tier-hint">📉 Add ${nextTier.min - qty} more carton${nextTier.min - qty !== 1 ? 's' : ''} to unlock <strong>−${Math.round((1 - nextTier.price / product.tiers[0].price) * 100)}% pricing</strong></div>
-          ` : ''}
+            `;
+          }).join('')}
         </div>
       </div>
-    </div>`;
+
+      <!-- Cart controls -->
+      <div class="product-actions">
+
+        <div class="stepper">
+          <button class="stepper-btn"
+            onclick="updateCart('${product.id}', ${Math.max(0, qty - 1)})"
+            ${qty === 0 ? 'disabled' : ''}>
+            −
+          </button>
+
+          <input
+            class="stepper-input"
+            type="number"
+            min="0"
+            value="${qty || ''}"
+            placeholder="0"
+            onchange="updateCart(
+              '${product.id}',
+              Math.max(0, parseInt(this.value)||0)
+            )"
+          />
+
+          <button class="stepper-btn"
+            onclick="updateCart('${product.id}', ${qty + 1})">
+            +
+          </button>
+        </div>
+
+        ${qty > 0 ? `
+          <div class="subtotal-badge">
+            <div class="subtotal-price">
+              SGD $${(activeTier.price * qty).toFixed(2)}
+            </div>
+
+            <div class="subtotal-pouches">
+              ${qty * 50} pouches
+            </div>
+          </div>
+        ` : ''}
+
+      </div>
+
+    </div>
+  </div>
+`;
 }
 
 /** Refreshes the product list (called after any cart change). */
