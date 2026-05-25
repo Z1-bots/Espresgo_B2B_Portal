@@ -1,4 +1,47 @@
-// api/chat.js - Secure backend proxy for the OpenRouter / Gemini 2.5 Flash AI Chatbox
+// api/chat.js - Secure backend proxy using native https to guarantee 100% runtime compatibility on Vercel Node
+
+const https = require('https');
+
+// Helper to make HTTPS requests using Node's native core module (no dependencies, works on any Node version)
+function makeHttpsRequest(options, payload) {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify(payload);
+    
+    // Add Content-Length dynamically
+    options.headers = {
+      ...options.headers,
+      'Content-Length': Buffer.byteLength(postData)
+    };
+
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => {
+        body += chunk;
+      });
+      res.on('end', () => {
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          text: () => Promise.resolve(body),
+          json: () => {
+            try {
+              return Promise.resolve(JSON.parse(body));
+            } catch (err) {
+              return Promise.reject(new Error('Failed to parse JSON response: ' + body));
+            }
+          }
+        });
+      });
+    });
+
+    req.on('error', (err) => {
+      reject(err);
+    });
+
+    req.write(postData);
+    req.end();
+  });
+}
 
 module.exports = async function handler(req, res) {
   // CORS Headers for safety
@@ -109,52 +152,39 @@ AI BRAND RULES & BRAND LOYALTY:
 `;
 
   try {
-    const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-
     const payload = {
       model: 'deepseek/deepseek-v4-flash:free',
       messages: [
-        {
-          role: 'system',
-          content: systemInstruction
-        },
-        {
-          role: 'user',
-          content: question
-        }
+        { role: 'system', content: systemInstruction },
+        { role: 'user', content: question }
       ],
       temperature: 0.3,
       max_tokens: 500
     };
 
-    let response = await fetch(endpoint, {
+    const options = {
+      hostname: 'openrouter.ai',
+      port: 443,
+      path: '/api/v1/chat/completions',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
         'HTTP-Referer': 'http://localhost',
         'X-Title': 'Espresgo B2B Portal'
-      },
-      body: JSON.stringify(payload)
-    });
+      }
+    };
 
-    // Auto Fallback: If primary model fails (e.g. DeepSeek out of credits)
+    let response = await makeHttpsRequest(options, payload);
+
+    // Auto Fallback: If primary model fails (e.g., DeepSeek out of credits)
     if (!response.ok) {
       console.warn('DeepSeek v4 Flash failed. Falling back to Liquid free model...');
       const fallbackPayload = {
         ...payload,
         model: 'liquid/lfm-2.5-1.2b-instruct:free'
       };
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'HTTP-Referer': 'http://localhost',
-          'X-Title': 'Espresgo B2B Portal'
-        },
-        body: JSON.stringify(fallbackPayload)
-      });
+      response = await makeHttpsRequest(options, fallbackPayload);
     }
 
     if (!response.ok) {

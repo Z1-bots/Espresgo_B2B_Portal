@@ -394,7 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="faq-chat-body" id="faq-chat-body"></div>
       <div class="faq-options-panel" id="faq-options-panel">
         <div class="faq-options-title">Click a question to ask</div>
-        <div id="faq-buttons-container" style="display: flex; flex-direction: column; gap: 0.5rem;"></div>
+        <div id="faq-buttons-container"></div>
       </div>
       <!-- AI Typing Input Area -->
       <div class="faq-input-container">
@@ -433,7 +433,6 @@ document.addEventListener('DOMContentLoaded', () => {
     faqButtonsContainer.innerHTML = faqData.map((item, index) => `
       <button class="faq-option-btn" data-index="${index}">
         <span>${item.q}</span>
-        <span class="faq-option-arrow">➔</span>
       </button>
     `).join('');
 
