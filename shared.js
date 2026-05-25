@@ -48,7 +48,7 @@ const Products = [
     labelColor: '#F5E0C8',
     active: true,
     tiers: [
-      { min: 1,  max: 9,  price: 120 },
+      { min: 1, max: 9, price: 120 },
       { min: 10, max: 29, price: 108 },
       { min: 30, max: null, price: 96 },
     ],
@@ -66,7 +66,7 @@ const Products = [
     labelColor: '#FFF0E0',
     active: true,
     tiers: [
-      { min: 1,  max: 9,  price: 130 },
+      { min: 1, max: 9, price: 130 },
       { min: 10, max: 29, price: 117 },
       { min: 30, max: null, price: 104 },
     ],
@@ -85,7 +85,7 @@ const Products = [
     active: false,
     comingSoonHint: 'Matcha + espresso blend — Q3 2026',
     tiers: [
-      { min: 1,  max: 9,  price: 125 },
+      { min: 1, max: 9, price: 125 },
       { min: 10, max: 29, price: 112 },
       { min: 30, max: null, price: 100 },
     ],
@@ -104,7 +104,7 @@ const Products = [
     active: false,
     comingSoonHint: 'Swiss water decaf process — Q4 2026',
     tiers: [
-      { min: 1,  max: 9,  price: 115 },
+      { min: 1, max: 9, price: 115 },
       { min: 10, max: 29, price: 103 },
       { min: 30, max: null, price: 92 },
     ],
@@ -166,12 +166,12 @@ function showToast(title, body = '', type = 'success') {
 function buildNav(activePage) {
   const user = Auth.getUser();
   const loggedIn = !!user;
-  const initials = user ? (user.contactName || user.companyName || 'U').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase() : '';
+  const initials = user ? (user.contactName || user.companyName || 'U').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() : '';
 
   const portalLinks = `
   <li>
     <a href="catalog.html"
-       class="nav-link ${activePage==='catalog' ? 'active' : ''}">
+       class="nav-link ${activePage === 'catalog' ? 'active' : ''}">
        Catalog
     </a>
   </li>
@@ -179,14 +179,14 @@ function buildNav(activePage) {
   ${loggedIn ? `
     <li>
       <a href="quick-order.html"
-         class="nav-link ${activePage==='quick-order' ? 'active' : ''}">
+         class="nav-link ${activePage === 'quick-order' ? 'active' : ''}">
          Quick Order
       </a>
     </li>
 
     <li>
       <a href="account.html"
-         class="nav-link ${activePage==='account' ? 'active' : ''}">
+         class="nav-link ${activePage === 'account' ? 'active' : ''}">
          Account
       </a>
     </li>
@@ -221,18 +221,18 @@ function buildNav(activePage) {
 
   const mobilePortalLinks = `
   <a href="catalog.html"
-     class="nav-mobile-link ${activePage==='catalog' ? 'active' : ''}">
+     class="nav-mobile-link ${activePage === 'catalog' ? 'active' : ''}">
      📦 Catalog
   </a>
 
   ${loggedIn ? `
     <a href="quick-order.html"
-       class="nav-mobile-link ${activePage==='quick-order' ? 'active' : ''}">
+       class="nav-mobile-link ${activePage === 'quick-order' ? 'active' : ''}">
        ⚡ Quick Order
     </a>
 
     <a href="account.html"
-       class="nav-mobile-link ${activePage==='account' ? 'active' : ''}">
+       class="nav-mobile-link ${activePage === 'account' ? 'active' : ''}">
        👤 Account
     </a>
 
@@ -258,8 +258,8 @@ function buildNav(activePage) {
         </a>
         <ul class="nav-links" role="list">
           ${portalLinks}
-          <li><a href="about.html"   class="nav-link ${activePage==='about'   ?'active':''}">About</a></li>
-          <li><a href="contact.html" class="nav-link ${activePage==='contact' ?'active':''}">Contact</a></li>
+          <li><a href="about.html"   class="nav-link ${activePage === 'about' ? 'active' : ''}">About</a></li>
+          <li><a href="contact.html" class="nav-link ${activePage === 'contact' ? 'active' : ''}">Contact</a></li>
         </ul>
         <div class="nav-right-desktop" style="display:flex;align-items:center;gap:.5rem;">${rightDesktop}</div>
         <button class="nav-hamburger" id="hamburger-btn" aria-label="Toggle menu" aria-expanded="false">
@@ -268,8 +268,8 @@ function buildNav(activePage) {
       </div>
       <div class="nav-mobile" id="mobile-menu" role="menu" aria-hidden="true">
         ${mobilePortalLinks}
-        <a href="about.html"   class="nav-mobile-link ${activePage==='about'   ?'active':''}">ℹ️ About</a>
-        <a href="contact.html" class="nav-mobile-link ${activePage==='contact' ?'active':''}">✉️ Contact</a>
+        <a href="about.html"   class="nav-mobile-link ${activePage === 'about' ? 'active' : ''}">ℹ️ About</a>
+        <a href="contact.html" class="nav-mobile-link ${activePage === 'contact' ? 'active' : ''}">✉️ Contact</a>
         <div class="nav-mobile-divider"></div>
         ${mobileAuth}
       </div>
@@ -332,7 +332,7 @@ function pouchSVG(product, size = 130, dimmed = false) {
   const { pouchColor, pouchAccent, labelColor, name } = product;
   const h = size * 1.55;
   const label = name.replace('ESPRESSGO ', '');
-  return `<svg width="${size}" height="${h}" viewBox="0 0 100 155" xmlns="http://www.w3.org/2000/svg" style="opacity:${dimmed?.4:1}">
+  return `<svg width="${size}" height="${h}" viewBox="0 0 100 155" xmlns="http://www.w3.org/2000/svg" style="opacity:${dimmed ? .4 : 1}">
     <rect x="42" y="0" width="16" height="14" rx="4" fill="${pouchAccent}"/>
     <path d="M36 14 Q30 20 28 30 L72 30 Q70 20 64 14 Z" fill="${pouchColor}"/>
     <rect x="18" y="30" width="64" height="100" rx="12" fill="${pouchColor}"/>
@@ -498,7 +498,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!text || !text.trim()) return;
 
     const queryText = text.trim();
-    
+
     // Clear the input bar
     faqUserInput.value = '';
 
@@ -514,7 +514,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Check if running on localhost or custom offline mode to call OpenRouter directly from browser
       const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.includes('192.168.');
-      const localKey = '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'; // OpenRouter Key
+      const localKey = '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'; // OpenRouter Key
 
       if (isLocal && localKey) {
         try {
@@ -685,9 +685,9 @@ AI SYSTEM RULES:
   function initChat() {
     if (hasInitialized) return;
     hasInitialized = true;
-    
+
     // Greeting Message
-    addMessage('agent', "Hello B2B partner! 👋 I am your automated EspressGo Assistant, powered by Gemini 1.5. Ask me anything about our wholesale pricing, Singapore logistics, caffeine parameters, or procurement! \n\nOr click a shortcut question to begin:");
+    addMessage('agent', "Hello B2B partner! 👋 I am your automated EspressGo Assistant, powered by Meow. Ask me anything about our wholesale pricing, Singapore logistics, caffeine parameters, or procurement! \n\nOr click a shortcut question to begin:");
     renderOptions();
   }
 
