@@ -117,9 +117,148 @@ function handleReorder(id) {
   renderAll();
 }
 
-/** Placeholder for future PDF invoice generation. */
+/** Generates and downloads a PDF invoice using PDFKit & localized memory streams. */
 function handleInvoice(id) {
-  showToast(`Invoice #${id}`, 'PDF generation coming soon — contact your account manager.');
+  const o = getMyOrders().find(x => x.id === id);
+  if (!o) {
+    showToast('Error', 'Order details not found.');
+    return;
+  }
+
+  // 1. Get the verified PDFDocument class
+  const PDFDocument = window.PDFDocument;
+  if (!PDFDocument) {
+    showToast('Error', 'PDF Engine failed to load. Please reload.');
+    return;
+  }
+
+  // 2. INLINE BLOB-STREAM FACTORY (Replaces the broken external library file completely)
+  const pdfChunks = [];
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+
+  // Capture document compilation output array streams natively
+  doc.on('data', chunk => pdfChunks.push(chunk));
+
+  const dateStr = new Date(o.dateOrdered).toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' });
+  const rightAlignX = 555; // Right margin bound based on A4 width
+
+  // ── HEADER SECTION ──
+  doc.fillColor('#2B1B10') // Deep brown color match
+     .font('Helvetica-Bold')
+     .fontSize(24)
+     .text('INVOICE', 40, 50);
+
+  // Invoice Meta (Right-aligned using column formatting options)
+  doc.font('Helvetica')
+     .fontSize(10)
+     .fillColor('#646464')
+     .text(`Invoice ID: #${o.id}`, 350, 45, { width: 205, align: 'right' })
+     .text(`Date Issued: ${dateStr}`, 350, 58, { width: 205, align: 'right' })
+     .text(`Payment Terms: Net 30`, 350, 71, { width: 205, align: 'right' });
+
+  // Horizontal Rule Line
+  doc.moveTo(40, 95)
+     .lineTo(rightAlignX, 95)
+     .lineWidth(0.5)
+     .strokeColor('#F0EAE4')
+     .stroke();
+
+  // ── BILLING DETAILS ──
+  doc.fillColor('#2B1B10')
+     .font('Helvetica-Bold')
+     .fontSize(11)
+     .text('Billed To:', 40, 115);
+
+  doc.font('Helvetica')
+     .fontSize(10)
+     .text(user.companyName || 'Valued Customer', 40, 132)
+     .text(`Attn: ${user.contactName || 'Procurement Team'}`, 40, 147);
+  
+  // Wrap and print multi-line delivery address block smoothly
+  doc.text(user.deliveryAddress || 'Singapore', 40, 162, { width: 250 });
+
+  // ── TABLE CONSTRUCT ──
+  let startY = 230;
+
+  // Render Table Header Background Strip
+  doc.rect(40, startY, 515, 20)
+     .fill('#FAF8F5');
+
+  // Table Column Typography Headers
+  doc.fillColor('#786E64')
+     .font('Helvetica-Bold')
+     .fontSize(9)
+     .text('Item Description', 50, startY + 6)
+     .text('Qty (ctn)', 330, startY + 6, { width: 50, align: 'right' })
+     .text('Price/ctn', 380, startY + 6, { width: 90, align: 'right' })
+     .text('Total Amount', 480, startY + 6, { width: 70, align: 'right' });
+
+  // Print Line Item Loop rows
+  let currentY = startY + 20;
+  doc.font('Helvetica')
+     .fontSize(10)
+     .fillColor('#2B1B10');
+
+  o.items.forEach((item) => {
+    const itemTotal = item.cartons * item.pricePerCarton;
+
+    // Row Data Output
+    doc.text(item.name, 50, currentY + 7, { width: 280 })
+       .text(item.cartons.toString(), 330, currentY + 7, { width: 50, align: 'right' })
+       .text(`SGD $${item.pricePerCarton.toFixed(2)}`, 380, currentY + 7, { width: 90, align: 'right' })
+       .text(`SGD $${itemTotal.toFixed(2)}`, 480, currentY + 7, { width: 70, align: 'right' });
+
+    currentY += 24;
+
+    // Draw row divider lines
+    doc.moveTo(40, currentY)
+       .lineTo(rightAlignX, currentY)
+       .lineWidth(0.5)
+       .strokeColor('#000000')
+       .stroke();
+  });
+
+  // ── SUMMARY FOOTER BLOCK ──
+  currentY += 20;
+  doc.font('Helvetica-Bold')
+     .fontSize(10)
+     .text('Total Cartons Ordered:', 320, currentY, { width: 140, align: 'right' });
+  doc.font('Helvetica')
+     .text(`${o.totalCartons} cartons`, 470, currentY, { width: 80, align: 'right' });
+
+  currentY += 18;
+  doc.font('Helvetica-Bold')
+     .fontSize(12)
+     .text('Grand Total Due (SGD):', 300, currentY, { width: 160, align: 'right' });
+  doc.fillColor('#D97706') // Amber accent brand match color
+     .text(`$${o.totalAmount.toFixed(2)}`, 470, currentY, { width: 80, align: 'right' });
+
+  // Legal / Terms Footer Notes
+  doc.fillColor('#969696')
+     .font('Helvetica-Oblique')
+     .fontSize(8)
+     .text('Thank you for your business! Payment is due within 30 days via GIRO / Corporate PayNow transfers.', 40, currentY + 50, { width: 515, align: 'center' });
+
+  // 3. SECURELY COMPILE AND DOWNLOAD AUTOMATICALLY
+  // Instead of an asynchronous stream library event listener, we compile immediately upon ending
+  doc.on('end', () => {
+    const blob = new Blob(pdfChunks, { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+
+    const downloadLink = document.createElement('a');
+    downloadLink.href = url;
+    downloadLink.download = `Invoice_${o.id}.pdf`;
+    
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    
+    document.body.removeChild(downloadLink);
+    URL.revokeObjectURL(url);
+    showToast('Invoice Downloaded', `Saved Invoice #${o.id} successfully.`);
+  });
+
+  // Closes the document mapping engine, firing the 'end' event block above
+  doc.end();
 }
 
 
