@@ -160,78 +160,80 @@ AI BRAND RULES & BRAND LOYALTY:
       'liquid/lfm-2.5-1.2b-instruct:free'
     ];
 
-    let lastErrorText = "";
+    let lastErrorText = '';
     let successfullyFetched = false;
     let responseData = null;
 
-  for (const model of models) {
-    try {
-      console.log(`[Proxy] Querying OpenRouter model: ${model}`);
-      const payload = {
-        model: model,
-        messages: [
-          { role: 'system', content: systemInstruction },
-          { role: 'user', content: question }
-        ],
-        temperature: 0.3,
-        max_tokens: 500
-      };
-
-      const options = {
-        hostname: 'openrouter.ai',
-        port: 443,
-        path: '/api/v1/chat/completions',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'HTTP-Referer': 'http://localhost',
-          'X-Title': 'Espresgo B2B Portal'
-        }
-      };
-
-      const response = await makeHttpsRequest(options, payload);
-
-      if (response.ok) {
-        responseData = await response.json();
-        successfullyFetched = true;
-        console.log(`[Proxy] Successfully fetched from model: ${model}`);
-        break; // Stop cycling once a successful model response is received!
-      } else {
-        lastErrorText = await response.text();
-        console.warn(`[Proxy] Model ${model} returned non-200 status ${response.status}: ${lastErrorText}`);
+    const options = {
+      hostname: 'openrouter.ai',
+      port: 443,
+      path: '/api/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://espresgo-b2-b-portal.vercel.app',
+        'X-Title': 'Espresgo B2B Portal'
       }
-    } catch (modelErr) {
-      lastErrorText = modelErr.message;
-      console.warn(`[Proxy] Exception calling model ${model}:`, modelErr);
+    };
+
+    for (const model of models) {
+      try {
+        console.log(`[Proxy] Trying model: ${model}`);
+        const payload = {
+          model: model,
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: question }
+          ],
+          temperature: 0.4,
+          max_tokens: 500
+        };
+
+        const response = await makeHttpsRequest(options, payload);
+
+        if (response.ok) {
+          responseData = await response.json();
+          successfullyFetched = true;
+          console.log(`[Proxy] Success with model: ${model}`);
+          break;
+        } else {
+          lastErrorText = await response.text();
+          console.warn(`[Proxy] Model ${model} failed (${response.status}): ${lastErrorText.substring(0, 200)}`);
+        }
+      } catch (modelErr) {
+        lastErrorText = modelErr.message;
+        console.warn(`[Proxy] Exception with model ${model}:`, modelErr.message);
+      }
     }
-  }
 
-  if (!successfullyFetched) {
-    console.error('[Proxy] All configured fallback models failed. Last error payload:', lastErrorText);
-    return res.status(502).json({
-      error: 'Failed to retrieve response from all configured OpenRouter models.',
-      details: lastErrorText
-    });
-  }
+    if (!successfullyFetched) {
+      console.error('[Proxy] All models exhausted. Last error:', lastErrorText);
+      return res.status(502).json({
+        error: 'All configured AI models are currently unavailable.',
+        details: lastErrorText
+      });
+    }
 
-  let answerText = "";
-  try {
-    answerText = responseData.choices[0].message.content;
-  } catch (parseError) {
-    console.error('[Proxy] Malformed payload parsing choices:', parseError, responseData);
-    return res.status(502).json({
-      error: 'Received malformed choices response payload from OpenRouter API.',
-      raw: responseData
-    });
-  }
+    let answerText = '';
+    try {
+      answerText = responseData.choices[0].message.content;
+    } catch (parseErr) {
+      console.error('[Proxy] Failed to parse choices from response:', parseErr, JSON.stringify(responseData).substring(0, 500));
+      return res.status(502).json({
+        error: 'Malformed response from OpenRouter API.',
+        raw: responseData
+      });
+    }
 
-  return res.status(200).json({ answer: answerText });
+    return res.status(200).json({ answer: answerText });
+
   } catch (error) {
-    console.error('Serverless internal exception:', error);
+    console.error('[Proxy] Unexpected internal exception:', error);
     return res.status(500).json({
-      error: 'Internal Server Error within serverless chat handler.',
+      error: 'Internal Server Error in chat handler.',
       details: error.message
     });
   }
 };
+
