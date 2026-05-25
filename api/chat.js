@@ -152,64 +152,81 @@ AI BRAND RULES & BRAND LOYALTY:
 `;
 
   try {
-    const payload = {
-      model: 'deepseek/deepseek-v4-flash:free',
-      messages: [
-        { role: 'system', content: systemInstruction },
-        { role: 'user', content: question }
-      ],
-      temperature: 0.3,
-      max_tokens: 500
-    };
+    const models = [
+      'google/gemini-2.5-flash:free',
+      'meta-llama/llama-3-8b-instruct:free',
+      'qwen/qwen-2.5-coder-32b-instruct:free',
+      'microsoft/phi-3-medium-128k-instruct:free',
+      'liquid/lfm-2.5-1.2b-instruct:free'
+    ];
 
-    const options = {
-      hostname: 'openrouter.ai',
-      port: 443,
-      path: '/api/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'HTTP-Referer': 'http://localhost',
-        'X-Title': 'Espresgo B2B Portal'
-      }
-    };
+    let lastErrorText = "";
+    let successfullyFetched = false;
+    let responseData = null;
 
-    let response = await makeHttpsRequest(options, payload);
-
-    // Auto Fallback: If primary model fails (e.g., DeepSeek out of credits)
-    if (!response.ok) {
-      console.warn('DeepSeek v4 Flash failed. Falling back to Liquid free model...');
-      const fallbackPayload = {
-        ...payload,
-        model: 'liquid/lfm-2.5-1.2b-instruct:free'
-      };
-      response = await makeHttpsRequest(options, fallbackPayload);
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('OpenRouter API Error details (fallback failed):', errorText);
-      return res.status(502).json({
-        error: 'Failed to retrieve response from OpenRouter API.',
-        details: errorText
-      });
-    }
-
-    const data = await response.json();
-    let answerText = "";
-
+  for (const model of models) {
     try {
-      answerText = data.choices[0].message.content;
-    } catch (parseError) {
-      console.error('Failed to parse OpenRouter response payload:', parseError, data);
-      return res.status(502).json({
-        error: 'Received malformed payload from OpenRouter.',
-        raw: data
-      });
-    }
+      console.log(`[Proxy] Querying OpenRouter model: ${model}`);
+      const payload = {
+        model: model,
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: question }
+        ],
+        temperature: 0.3,
+        max_tokens: 500
+      };
 
-    return res.status(200).json({ answer: answerText });
+      const options = {
+        hostname: 'openrouter.ai',
+        port: 443,
+        path: '/api/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'HTTP-Referer': 'http://localhost',
+          'X-Title': 'Espresgo B2B Portal'
+        }
+      };
+
+      const response = await makeHttpsRequest(options, payload);
+
+      if (response.ok) {
+        responseData = await response.json();
+        successfullyFetched = true;
+        console.log(`[Proxy] Successfully fetched from model: ${model}`);
+        break; // Stop cycling once a successful model response is received!
+      } else {
+        lastErrorText = await response.text();
+        console.warn(`[Proxy] Model ${model} returned non-200 status ${response.status}: ${lastErrorText}`);
+      }
+    } catch (modelErr) {
+      lastErrorText = modelErr.message;
+      console.warn(`[Proxy] Exception calling model ${model}:`, modelErr);
+    }
+  }
+
+  if (!successfullyFetched) {
+    console.error('[Proxy] All configured fallback models failed. Last error payload:', lastErrorText);
+    return res.status(502).json({
+      error: 'Failed to retrieve response from all configured OpenRouter models.',
+      details: lastErrorText
+    });
+  }
+
+  let answerText = "";
+  try {
+    answerText = responseData.choices[0].message.content;
+  } catch (parseError) {
+    console.error('[Proxy] Malformed payload parsing choices:', parseError, responseData);
+    return res.status(502).json({
+      error: 'Received malformed choices response payload from OpenRouter API.',
+      raw: responseData
+    });
+  }
+
+  return res.status(200).json({ answer: answerText });
   } catch (error) {
     console.error('Serverless internal exception:', error);
     return res.status(500).json({

@@ -627,9 +627,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
           }
         } else {
-          const errorData = await response.json().catch(() => ({}));
-          console.error('Vercel API error payload:', errorData);
-          addMessage('agent', "My serverless coffee brain encountered a temporary glitch. Please feel free to request quick custom assistance directly from Damien via WhatsApp!");
+          console.error('API non-OK response status:', response.status);
+          if (response.status === 404 && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+            addMessage('agent', "⚠️ **Local Server Route Warning**: It looks like you are running a static local server (like Python's `http.server` or VS Code Live Server). Static servers **cannot** run Node.js backend routes (like `/api/chat.js`), which causes this local 404 error. \n\nTo test the generative AI locally, please run `npx vercel dev` in your command line, or visit the live production site to try it out: **[espresgo-b2-b-portal.vercel.app](https://espresgo-b2-b-portal.vercel.app/catalog)**! 👋");
+          } else {
+            addMessage('agent', "My serverless coffee brain encountered a temporary glitch. Please feel free to request quick custom assistance directly from Damien via WhatsApp!");
+          }
         }
       } catch (error) {
         removeTypingIndicator();
