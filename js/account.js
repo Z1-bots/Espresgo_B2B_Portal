@@ -48,7 +48,7 @@ function totalSpend(orders) { return orders.reduce((s, o) => s + o.totalAmount, 
  * Builds the HTML for the order list (used in both Overview and Orders tabs).
  * Shows an empty state if there are no orders.
  */
-function orderListHTML(list) {
+function orderListHTML(list, suffix = '') {
   if (!list.length) return `
     <div style="padding:4rem 1.5rem;display:flex;flex-direction:column;align-items:center;text-align:center;">
       <div style="font-size:2.5rem;margin-bottom:.75rem;opacity:.3;">📦</div>
@@ -62,7 +62,7 @@ function orderListHTML(list) {
     const date = new Date(o.dateOrdered).toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' });
 
     return `<div class="order-row">
-      <div class="order-row-header" onclick="toggleOrder('${o.id}')" role="button" aria-expanded="false" id="hdr-${o.id}">
+      <div class="order-row-header" onclick="toggleOrder('${o.id}', '${suffix}')" role="button" aria-expanded="false" id="hdr-${o.id}${suffix}">
         <div class="order-dot" style="background:${sc.dot};"></div>
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.2rem;">
@@ -73,9 +73,9 @@ function orderListHTML(list) {
           <div class="order-meta">${date} · ${o.totalCartons} ctn · ${(o.totalCartons * 50).toLocaleString()} pouches</div>
         </div>
         <div class="order-amount">SGD $${o.totalAmount.toFixed(2)}</div>
-        <div class="order-chevron" id="chev-${o.id}">▾</div>
+        <div class="order-chevron" id="chev-${o.id}${suffix}">▾</div>
       </div>
-      <div class="order-detail" id="det-${o.id}">
+      <div class="order-detail" id="det-${o.id}${suffix}">
         <div class="order-items">
           <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.6rem;">Items</div>
           ${o.items.map(it => `<div class="order-item-row">
@@ -93,10 +93,10 @@ function orderListHTML(list) {
 }
 
 /** Toggles the expanded/collapsed state of an order row. */
-function toggleOrder(id) {
-  const det  = document.getElementById('det-' + id);
-  const chev = document.getElementById('chev-' + id);
-  const hdr  = document.getElementById('hdr-' + id);
+function toggleOrder(id, suffix = '') { // <-- 1. Accept suffix tracking parameter
+  const det  = document.getElementById('det-' + id + suffix); // <-- 2. Target localized elements
+  const chev = document.getElementById('chev-' + id + suffix);
+  const hdr  = document.getElementById('hdr-' + id + suffix);
   const open = det.classList.toggle('open');
   if (chev) chev.classList.toggle('open', open);
   if (hdr)  hdr.setAttribute('aria-expanded', open);
@@ -309,7 +309,7 @@ function renderOverview() {
         <h2 style="font-size:1rem;color:var(--brown);">Recent Orders</h2>
         <button onclick="switchTab('orders')" style="font-size:12px;color:var(--amber);background:none;border:none;cursor:pointer;">View all →</button>
       </div>
-      ${orderListHTML(my.slice(0, 3))}
+      ${orderListHTML(my.slice(0, 3), '-ov')}
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem;">
