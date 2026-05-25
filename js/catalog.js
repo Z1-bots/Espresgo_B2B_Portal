@@ -6,7 +6,6 @@
    ============================================================ */
 
 // ── Auth & initialisation ─────────────────────────────────
-requireAuth();
 buildNav('catalog');
 buildFooter();
 
@@ -165,7 +164,25 @@ document.getElementById('clear-cart-btn').addEventListener('click', () => {
   updateCheckoutBar();
 });
 
-document.getElementById('checkout-btn').addEventListener('click', openModal);
+document.getElementById('checkout-btn').addEventListener('click', () => {
+
+  // Guests can browse but must log in to purchase
+  if (typeof Auth !== 'undefined' && !Auth.isLoggedIn()) {
+
+    // Save destination for redirect after login
+    localStorage.setItem('redirectAfterLogin', 'catalog.html');
+
+    showToast('Please sign in to continue checkout.');
+    setTimeout(() => {
+      window.location.href = 'login.html';
+    }, 600);
+
+    return;
+  }
+
+  openModal();
+});
+
 document.getElementById('modal-close').addEventListener('click', closeModal);
 document.getElementById('modal-back').addEventListener('click', closeModal);
 // Close modal when clicking the backdrop
@@ -211,6 +228,17 @@ function closeModal() { modal.classList.remove('open'); }
 
 /** Places the order, clears the cart, and shows a success toast. */
 document.getElementById('modal-place').addEventListener('click', () => {
+
+  // Prevent guest checkout
+  if (typeof Auth !== 'undefined' && !Auth.isLoggedIn()) {
+    showToast('Please sign in before placing your order.');
+    window.location.href = 'login.html';
+    return;
+  }
+
+  // Refresh user data after login
+  const currentUser = Auth.getUser();
+  
   const lines = getOrderLines();
   Orders.add({
     company: user.companyName,

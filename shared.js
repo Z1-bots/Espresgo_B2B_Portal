@@ -168,12 +168,32 @@ function buildNav(activePage) {
   const loggedIn = !!user;
   const initials = user ? (user.contactName || user.companyName || 'U').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase() : '';
 
-  const portalLinks = loggedIn ? `
-    <li><a href="catalog.html"    class="nav-link ${activePage==='catalog'    ?'active':''}">Catalog</a></li>
-    <li><a href="quick-order.html" class="nav-link ${activePage==='quick-order'?'active':''}">Quick Order</a></li>
-    <li><a href="account.html"    class="nav-link ${activePage==='account'    ?'active':''}">Account</a></li>
+  const portalLinks = `
+  <li>
+    <a href="catalog.html"
+       class="nav-link ${activePage==='catalog' ? 'active' : ''}">
+       Catalog
+    </a>
+  </li>
+
+  ${loggedIn ? `
+    <li>
+      <a href="quick-order.html"
+         class="nav-link ${activePage==='quick-order' ? 'active' : ''}">
+         Quick Order
+      </a>
+    </li>
+
+    <li>
+      <a href="account.html"
+         class="nav-link ${activePage==='account' ? 'active' : ''}">
+         Account
+      </a>
+    </li>
+
     <li><div class="nav-divider"></div></li>
-  ` : '';
+  ` : ''}
+`;
 
   const rightDesktop = loggedIn ? `
     <a href="admin/admin-login.html" class="nav-admin-btn" style="font-size:12px;">🛡 Admin</a>
@@ -199,12 +219,26 @@ function buildNav(activePage) {
     </div>
   ` : `<a href="login.html" class="nav-btn">Sign In</a>`;
 
-  const mobilePortalLinks = loggedIn ? `
-    <a href="catalog.html"     class="nav-mobile-link ${activePage==='catalog'     ?'active':''}">📦 Catalog</a>
-    <a href="quick-order.html" class="nav-mobile-link ${activePage==='quick-order' ?'active':''}">⚡ Quick Order</a>
-    <a href="account.html"     class="nav-mobile-link ${activePage==='account'     ?'active':''}">👤 Account</a>
+  const mobilePortalLinks = `
+  <a href="catalog.html"
+     class="nav-mobile-link ${activePage==='catalog' ? 'active' : ''}">
+     📦 Catalog
+  </a>
+
+  ${loggedIn ? `
+    <a href="quick-order.html"
+       class="nav-mobile-link ${activePage==='quick-order' ? 'active' : ''}">
+       ⚡ Quick Order
+    </a>
+
+    <a href="account.html"
+       class="nav-mobile-link ${activePage==='account' ? 'active' : ''}">
+       👤 Account
+    </a>
+
     <div class="nav-mobile-divider"></div>
-  ` : '';
+  ` : ''}
+`;
 
   const mobileAuth = loggedIn ? `
     <a href="admin/admin-login.html" class="nav-mobile-link">🛡 Admin Portal</a>
@@ -215,7 +249,7 @@ function buildNav(activePage) {
   const html = `
     <nav class="nav" role="navigation" aria-label="Main navigation">
       <div class="nav-inner">
-        <a href="${loggedIn?'catalog':'about'}.html" class="nav-logo" aria-label="ESPRESSGO home">
+        <a href="catalog.html" class="nav-logo" aria-label="ESPRESSGO home">
           <div class="nav-logo-icon">E</div>
           <div class="nav-logo-text">
             <div class="nav-logo-name">ESPRESSGO</div>
