@@ -411,10 +411,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 2. State & FAQ Data definitions
   const faqData = [
-    { q: "How long does delivery take?" },
-    { q: "Can I track my order?" },
-    { q: "Does EspressGo contain dairy or sugar?" },
-    { q: "Is EspressGo halal-certified?" }
+    { 
+      q: "How long does delivery take?",
+      answer: "Singapore logistics typically take **2 to 3 business days** to arrive at your B2B warehouse. We offer free delivery islandwide for wholesale orders of 5 cartons or more!"
+    },
+    { 
+      q: "Does EspressGo contain dairy or sugar?",
+      answer: "We offer two premium B2B variants:\n- **ESPRESSGO Original**: Zero added sugar, dairy-free, and vegan-friendly pure robusta gel.\n- **ESPRESSGO Oat Milk**: Contains organic oat milk (100% dairy-free) and a subtle touch of natural brown sugar."
+    },
+    { 
+      q: "Is EspressGo halal-certified?",
+      answer: "Yes! ESPRESSGO is proud to be **MUIS Halal-certified**, manufactured under clean, fully compliant, and certified standards here in Singapore."
+    },
+    { 
+      q: "Can I track my order?" 
+    }
   ];
 
   const faqWidget = document.getElementById('faq-chat-widget');
@@ -425,6 +436,46 @@ document.addEventListener('DOMContentLoaded', () => {
   const faqButtonsContainer = document.getElementById('faq-buttons-container');
   const faqUserInput = document.getElementById('faq-user-input');
   const faqSendBtn = document.getElementById('faq-send-btn');
+
+  // 3. Mouse Drag Scroll behavior for Desktop Carousel
+  let isDown = false;
+  let startX;
+  let scrollLeft;
+  let moved = false;
+
+  faqButtonsContainer.addEventListener('mousedown', (e) => {
+    isDown = true;
+    moved = false;
+    startX = e.pageX - faqButtonsContainer.offsetLeft;
+    scrollLeft = faqButtonsContainer.scrollLeft;
+  });
+
+  faqButtonsContainer.addEventListener('mouseleave', () => {
+    isDown = false;
+  });
+
+  faqButtonsContainer.addEventListener('mouseup', () => {
+    isDown = false;
+  });
+
+  faqButtonsContainer.addEventListener('mousemove', (e) => {
+    if (!isDown) return;
+    e.preventDefault();
+    const x = e.pageX - faqButtonsContainer.offsetLeft;
+    const walk = (x - startX) * 1.5; // Drag scroll multiplier
+    if (Math.abs(x - startX) > 5) {
+      moved = true;
+    }
+    faqButtonsContainer.scrollLeft = scrollLeft - walk;
+  });
+
+  // Intercept the click on child elements if moved during drag
+  faqButtonsContainer.addEventListener('click', (e) => {
+    if (moved) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
 
   let hasInitialized = false;
 
@@ -506,6 +557,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 1. Post user message bubble
     addMessage('user', queryText);
+
+    // Check if the user query matches a static pre-defined answer to bypass the AI
+    const matchedFaq = faqData.find(item => item.answer && item.q.toLowerCase().trim() === queryText.toLowerCase().trim());
+    if (matchedFaq) {
+      setTimeout(() => {
+        showTypingIndicator();
+        setTimeout(() => {
+          removeTypingIndicator();
+          addMessage('agent', matchedFaq.answer);
+          setControlsDisabled(false);
+          faqChatBody.scrollTop = faqChatBody.scrollHeight;
+          faqUserInput.focus();
+        }, 600);
+      }, 300);
+      return;
+    }
 
     // 2. Add organic thinking delay delay
     setTimeout(async () => {

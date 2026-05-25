@@ -678,13 +678,28 @@ button:disabled { opacity: .35; cursor: not-allowed; }
   flex-direction: row;
   overflow-x: auto;
   gap: 0.5rem;
-  padding: 0.2rem 0.1rem 0.4rem;
+  padding: 0.2rem 0.1rem 0.5rem;
   width: 100%;
-  scrollbar-width: none; /* Hide scrollbar Firefox */
-  -ms-overflow-style: none;  /* Hide scrollbar IE 10+ */
+  scrollbar-width: thin;
+  scrollbar-color: var(--amber) transparent;
+  cursor: grab;
+  user-select: none;
+}
+#faq-buttons-container:active {
+  cursor: grabbing;
 }
 #faq-buttons-container::-webkit-scrollbar {
-  display: none; /* Hide scrollbar WebKit */
+  height: 4px;
+}
+#faq-buttons-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+#faq-buttons-container::-webkit-scrollbar-thumb {
+  background: var(--amber);
+  border-radius: 10px;
+}
+#faq-buttons-container::-webkit-scrollbar-thumb:hover {
+  background: #B8743A;
 }
 .faq-option-btn {
   background: var(--cream-lt);
