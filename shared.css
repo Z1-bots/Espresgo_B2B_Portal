@@ -707,3 +707,55 @@ button:disabled { opacity: .35; cursor: not-allowed; }
   transition: transform 0.2s ease;
 }
 
+/* AI Chat Box Input Panel */
+.faq-input-container {
+  display: flex;
+  padding: 0.65rem 0.85rem;
+  background: #fff;
+  border-top: 1px solid var(--border);
+  align-items: center;
+  gap: 0.5rem;
+}
+.faq-input {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: var(--cream-lt);
+  border-radius: 20px;
+  padding: 0.45rem 0.95rem;
+  font-size: 12.5px;
+  color: var(--brown);
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.faq-input:focus {
+  border-color: var(--amber);
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(200,133,58,0.1);
+}
+.faq-input::placeholder {
+  color: var(--muted-lt);
+}
+.faq-send-btn {
+  background: var(--amber);
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  transition: background 0.15s, transform 0.1s;
+  flex-shrink: 0;
+}
+.faq-send-btn:hover {
+  background: #B8743A;
+}
+.faq-send-btn:active {
+  transform: scale(0.92);
+}
+.faq-send-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+
