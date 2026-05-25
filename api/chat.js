@@ -23,7 +23,7 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: 'Missing parameter: "question" string is required.' });
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY || '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';
+  const apiKey = process.env.OPENROUTER_API_KEY;
 
   // Friendly fallback if key is not configured yet (for instant ease-of-use/testing)
   if (!apiKey) {
