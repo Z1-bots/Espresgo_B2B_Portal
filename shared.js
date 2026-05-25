@@ -358,8 +358,9 @@ function miniPouchSVG(color, accent, size = 32) {
   </svg>`;
 }
 
-// ── Social Floats ────────────────────────────────────────────
+// ── Social Floats & FAQ Agent ───────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // 1. Inject Floating Buttons & Chat Widget HTML
   const socialHTML = `
     <div class="social-floats">
       <a href="https://www.linkedin.com/in/damien-teo-371b31257" target="_blank" rel="noopener noreferrer" class="social-float-btn linkedin" aria-label="LinkedIn">
@@ -368,7 +369,172 @@ document.addEventListener('DOMContentLoaded', () => {
       <a href="https://wa.me/6587977961" target="_blank" rel="noopener noreferrer" class="social-float-btn whatsapp" aria-label="WhatsApp">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.031 0C5.385 0 0 5.386 0 12.031c0 2.146.561 4.241 1.626 6.096L.18 24l6.02-1.583C7.994 23.366 10.002 24 12.031 24 18.675 24 24 18.614 24 11.97 24 5.326 18.675 0 12.031 0zM12 21.921c-1.847 0-3.655-.494-5.239-1.428l-.375-.221-3.879 1.018 1.036-3.774-.243-.384A9.873 9.873 0 0 1 1.944 12c0-5.466 4.453-9.919 9.923-9.919 5.467 0 9.922 4.454 9.922 9.92S17.467 21.92 12 21.921zm5.45-7.462c-.298-.15-1.767-.872-2.039-.972-.274-.1-.472-.15-.672.15-.199.299-.77 .972-.944 1.17-.174.199-.348.225-.646.075-.298-.15-1.26-.464-2.4-1.485-.886-.793-1.484-1.774-1.658-2.073-.174-.299-.019-.462.13-.611.135-.134.298-.349.447-.523.149-.174.199-.299.298-.499.1-.198.05-.373-.024-.523-.075-.15-.672-1.621-.92-2.22-.242-.584-.488-.505-.672-.514-.174-.01-.373-.01-.572-.01-.199 0-.523.075-.797.374-.274.298-1.045 1.02-1.045 2.49 0 1.47 1.07 2.89 1.219 3.09.15.199 2.106 3.214 5.101 4.506.711.306 1.266.49 1.698.627.714.226 1.365.194 1.88.118.577-.085 1.767-.722 2.016-1.42.249-.697.249-1.295.174-1.42-.074-.124-.274-.198-.572-.348z"/></svg>
       </a>
+      <button class="social-float-btn faq" id="faq-toggle-btn" aria-label="FAQ Agent">
+        <span class="notification-badge" id="faq-badge"></span>
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.477 2 2 5.82 2 10.5c0 2.502 1.285 4.747 3.326 6.27-.14 1.155-.71 2.967-1.426 3.824 0 0 2.128-.112 4.417-1.48A12.753 12.753 0 0012 19c5.523 0 10-3.82 10-8.5S17.523 2 12 2zm1 12.5h-2v-2h2v2zm0-3.5h-2V7h2v4z"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="faq-widget" id="faq-chat-widget">
+      <div class="faq-widget-header">
+        <div class="faq-header-info">
+          <div class="faq-avatar">☕</div>
+          <div>
+            <div class="faq-status-title">EspressGo Helper</div>
+            <div class="faq-status-sub">
+              <span class="pulse-dot" style="width: 7px; height: 7px; background: #22c55e;"></span>
+              Auto-Reply Agent · Online
+            </div>
+          </div>
+        </div>
+        <button class="faq-close-btn" id="faq-close-btn" aria-label="Close FAQ menu">×</button>
+      </div>
+      <div class="faq-chat-body" id="faq-chat-body"></div>
+      <div class="faq-options-panel" id="faq-options-panel">
+        <div class="faq-options-title">Click a question to ask</div>
+        <div id="faq-buttons-container" style="display: flex; flex-direction: column; gap: 0.5rem;"></div>
+      </div>
     </div>
   `;
   document.body.insertAdjacentHTML('beforeend', socialHTML);
+
+  // 2. State & FAQ Data definitions
+  const faqData = [
+    {
+      q: "How long does delivery take?",
+      a: "Standard B2B delivery in Singapore takes **2 to 3 business days**. Next-day express delivery is available for orders confirmed before 12 PM (subject to a small SGD 15 surcharge)."
+    },
+    {
+      q: "Can I track my order?",
+      a: "Yes, absolutely! Logged-in users can check real-time progress of their delivery under the **<a href='account.html'>Account</a>** page (Order History section). You will also receive automated email tracking alerts."
+    },
+    {
+      q: "Does EspressGo contain dairy or sugar?",
+      a: "Our **Original Blend** gel shots are entirely **dairy-free** and low in sugar. Our creamy **Oat Milk Blend** uses premium plant-based oat milk (completely dairy-free too!) and is lightly sweetened with organic cane sugar. View full nutrition labels in our **<a href='catalog.html'>Catalog</a>**."
+    },
+    {
+      q: "Is EspressGo halal-certified?",
+      a: "Yes! All ingredients used in ESPRESSGO gel shots are **100% Halal-certified**, and our manufacturing partner complies strictly with MUIS Halal standards. We are happy to provide certificate copies to your procurement team upon request."
+    }
+  ];
+
+  const faqWidget = document.getElementById('faq-chat-widget');
+  const faqToggle = document.getElementById('faq-toggle-btn');
+  const faqClose = document.getElementById('faq-close-btn');
+  const faqBadge = document.getElementById('faq-badge');
+  const faqChatBody = document.getElementById('faq-chat-body');
+  const faqButtonsContainer = document.getElementById('faq-buttons-container');
+
+  let hasInitialized = false;
+
+  // Render clickable question buttons
+  function renderOptions() {
+    faqButtonsContainer.innerHTML = faqData.map((item, index) => `
+      <button class="faq-option-btn" data-index="${index}">
+        <span>${item.q}</span>
+        <span class="faq-option-arrow">➔</span>
+      </button>
+    `).join('');
+
+    // Attach listeners to buttons
+    faqButtonsContainer.querySelectorAll('.faq-option-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const idx = btn.getAttribute('data-index');
+        handleQuestionClick(idx);
+      });
+    });
+  }
+
+  // Format response helper: replaces simple markdown bold **text** with HTML <strong>text</strong>
+  function formatResponse(text) {
+    return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  }
+
+  // Add a message bubble to the chat
+  function addMessage(sender, text) {
+    const msg = document.createElement('div');
+    msg.className = `faq-msg ${sender}`;
+    msg.innerHTML = formatResponse(text);
+    faqChatBody.appendChild(msg);
+    faqChatBody.scrollTop = faqChatBody.scrollHeight;
+  }
+
+  // Trigger typing indicator
+  function showTypingIndicator() {
+    const indicator = document.createElement('div');
+    indicator.className = 'faq-typing';
+    indicator.id = 'faq-typing-indicator';
+    indicator.innerHTML = `
+      <div class="faq-typing-dot"></div>
+      <div class="faq-typing-dot"></div>
+      <div class="faq-typing-dot"></div>
+    `;
+    faqChatBody.appendChild(indicator);
+    faqChatBody.scrollTop = faqChatBody.scrollHeight;
+  }
+
+  function removeTypingIndicator() {
+    const indicator = document.getElementById('faq-typing-indicator');
+    if (indicator) indicator.remove();
+  }
+
+  // Handle FAQ question selection
+  function handleQuestionClick(index) {
+    const item = faqData[index];
+    
+    // Disable option buttons to prevent spamming
+    const buttons = faqButtonsContainer.querySelectorAll('.faq-option-btn');
+    buttons.forEach(b => b.disabled = true);
+
+    // 1. Append User Bubble
+    addMessage('user', item.q);
+
+    // 2. Show Typing Bouncing dots
+    setTimeout(() => {
+      showTypingIndicator();
+    }, 350);
+
+    // 3. Render Agent Auto-reply after brief typing delay
+    setTimeout(() => {
+      removeTypingIndicator();
+      addMessage('agent', item.a);
+      // Re-enable option buttons
+      buttons.forEach(b => b.disabled = false);
+    }, 1300);
+  }
+
+  // Initialize Chat content
+  function initChat() {
+    if (hasInitialized) return;
+    hasInitialized = true;
+    
+    // Greeting Message
+    addMessage('agent', "Hello there! 👋 I am your automated EspressGo B2B Helper. Ask me any of the standard questions below, or feel free to message Damien via **<a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>** for custom procurement orders!");
+    renderOptions();
+  }
+
+  // Toggle widget event listeners
+  faqToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = faqWidget.classList.toggle('open');
+    if (isOpen) {
+      if (faqBadge) faqBadge.style.display = 'none'; // Dismiss badge
+      initChat();
+    }
+  });
+
+  faqClose.addEventListener('click', (e) => {
+    e.stopPropagation();
+    faqWidget.classList.remove('open');
+  });
+
+  // Close when clicking outside the widget
+  document.addEventListener('click', (e) => {
+    if (!faqWidget.contains(e.target) && !faqToggle.contains(e.target)) {
+      faqWidget.classList.remove('open');
+    }
+  });
 });
+
