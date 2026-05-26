@@ -22,7 +22,7 @@
   }
 }
 
-@media (min-width: 450px) {
+@media (min-width: 1200px) {
   #products-list {
     grid-template-columns: repeat(3, 1fr);
     align-items: start;
