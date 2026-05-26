@@ -411,20 +411,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 2. State & FAQ Data definitions
   const faqData = [
-    { 
+    {
       q: "How long does delivery take?",
       answer: "Singapore logistics typically take **2 to 3 business days** to arrive at your B2B warehouse. We offer free delivery islandwide for wholesale orders of 5 cartons or more!"
     },
-    { 
+    {
       q: "Does EspressGo contain dairy or sugar?",
       answer: "We offer two premium B2B variants:\n- **ESPRESSGO Original**: Zero added sugar, dairy-free, and vegan-friendly pure robusta gel.\n- **ESPRESSGO Oat Milk**: Contains organic oat milk (100% dairy-free) and a subtle touch of natural brown sugar."
     },
-    { 
+    {
       q: "Is EspressGo halal-certified?",
       answer: "Yes! ESPRESSGO is proud to be **MUIS Halal-certified**, manufactured under clean, fully compliant, and certified standards here in Singapore."
     },
-    { 
-      q: "Can I track my order?" 
+    {
+      q: "Can I track my order?"
     }
   ];
 
@@ -594,32 +594,32 @@ document.addEventListener('DOMContentLoaded', () => {
         if (response.ok) {
           const data = await response.json();
           const rawAnswer = data.answer || "I parsed the coffee matrix, but found an empty response. Try rephrasing!";
-          
+
           // Regex to check for [[ORDER_ACTION: productId, cartons]]
           const orderMatch = rawAnswer.match(/\[\[ORDER_ACTION:\s*([a-zA-Z0-9_-]+),\s*(\d+)\s*\]\]/);
-          
+
           // Strip out structured brackets entirely to keep the visual UI clean
           const cleanedAnswer = rawAnswer.replace(/\[\[.*?\]\]/g, '').trim();
-          
+
           addMessage('agent', cleanedAnswer);
 
           // If the AI trigger is found, update the cart dynamically!
           if (orderMatch) {
             const productId = orderMatch[1];
             const cartons = parseInt(orderMatch[2], 10);
-            
+
             console.log(`🤖 AI Order Trigger matched! Adding ${cartons} cartons of ${productId} to cart.`);
-            
+
             // 1. Persist the updated cart state inside localStorage
             const localCart = JSON.parse(localStorage.getItem('espressgo_cart') || '{}');
             localCart[productId] = (localCart[productId] || 0) + cartons;
             localStorage.setItem('espressgo_cart', JSON.stringify(localCart));
-            
+
             // 2. If currently viewing catalog.html, execute page-level UI refresh
             if (typeof window.updateCart === 'function') {
               window.updateCart(productId, localCart[productId]);
             }
-            
+
             // 3. Display B2B Toast notification
             if (typeof showToast === 'function') {
               const productName = productId === 'espressgo-original' ? 'ESPRESSGO Original' : 'ESPRESSGO Oat Milk';
@@ -661,7 +661,7 @@ document.addEventListener('DOMContentLoaded', () => {
     hasInitialized = true;
 
     // Greeting Message
-    addMessage('agent', "Hello B2B partner! 👋 I am your automated EspressGo Assistant, powered by Meow. Ask me anything about our wholesale pricing, Singapore logistics, caffeine parameters, or procurement! \n\nOr click a shortcut question to begin:");
+    addMessage('agent', "Hello B2B partner! 👋 I am your automated EspressGo Assistant, powered by OpenRouter. Ask me anything about our wholesale pricing, Singapore logistics, caffeine parameters, or procurement! \n\nOr click a shortcut question to begin:");
     renderOptions();
   }
 
