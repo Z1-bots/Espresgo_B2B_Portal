@@ -385,7 +385,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="faq-status-title">EspressGo Helper</div>
             <div class="faq-status-sub">
               <span class="pulse-dot" style="width: 7px; height: 7px; background: #22c55e;"></span>
-              Auto-Reply Agent · Online
+              AI Agent · Online
             </div>
           </div>
         </div>
@@ -411,20 +411,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 2. State & FAQ Data definitions
   const faqData = [
-    { 
+    {
       q: "How long does delivery take?",
-      answer: "Singapore logistics typically take **2 to 3 business days** to arrive at your B2B warehouse. We offer free delivery islandwide for wholesale orders of 5 cartons or more!"
+      answer: "Singapore B2B logistics typically take **2 to 3 business days** to arrive at your warehouse! 🚚\n\nNeed it faster? We offer **next-day express delivery** for orders placed before 12 PM, with a small SGD 15 surcharge. Free islandwide delivery for orders of 5+ cartons!"
     },
-    { 
+    {
       q: "Does EspressGo contain dairy or sugar?",
-      answer: "We offer two premium B2B variants:\n- **ESPRESSGO Original**: Zero added sugar, dairy-free, and vegan-friendly pure robusta gel.\n- **ESPRESSGO Oat Milk**: Contains organic oat milk (100% dairy-free) and a subtle touch of natural brown sugar."
+      answer: "Great question! Here's the breakdown of our two B2B variants:\n\n- **ESPRESSGO Original** — Zero added sugar, 100% dairy-free, and fully vegan. Pure Vietnamese robusta cold brew gel.\n- **ESPRESSGO Oat Milk** — Contains organic oat milk (plant-based, 100% dairy-free) with a light touch of natural brown sugar.\n\nBoth are clean-label and office-friendly! ☕"
     },
-    { 
+    {
       q: "Is EspressGo halal-certified?",
-      answer: "Yes! ESPRESSGO is proud to be **MUIS Halal-certified**, manufactured under clean, fully compliant, and certified standards here in Singapore."
+      answer: "Absolutely yes! 🌙 ESPRESSGO is proudly **MUIS Halal-certified**, manufactured to the highest compliance standards here in Singapore.\n\nWe can provide a copy of our Halal certificate upon request — just reach out to Damien via <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>!"
     },
-    { 
-      q: "Can I track my order?" 
+    {
+      q: "Can I track my order?",
+      answer: "Yes! Every B2B order comes with **real-time tracking**. 📦\n\nOnce your order is dispatched, you will receive a tracking link via email. You can also monitor all your active orders anytime from your <a href='account.html'>Account Dashboard</a>.\n\nFor urgent tracking queries, contact Damien directly on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a> for an instant update!"
     }
   ];
 
@@ -594,32 +595,32 @@ document.addEventListener('DOMContentLoaded', () => {
         if (response.ok) {
           const data = await response.json();
           const rawAnswer = data.answer || "I parsed the coffee matrix, but found an empty response. Try rephrasing!";
-          
+
           // Regex to check for [[ORDER_ACTION: productId, cartons]]
           const orderMatch = rawAnswer.match(/\[\[ORDER_ACTION:\s*([a-zA-Z0-9_-]+),\s*(\d+)\s*\]\]/);
-          
+
           // Strip out structured brackets entirely to keep the visual UI clean
           const cleanedAnswer = rawAnswer.replace(/\[\[.*?\]\]/g, '').trim();
-          
+
           addMessage('agent', cleanedAnswer);
 
           // If the AI trigger is found, update the cart dynamically!
           if (orderMatch) {
             const productId = orderMatch[1];
             const cartons = parseInt(orderMatch[2], 10);
-            
+
             console.log(`🤖 AI Order Trigger matched! Adding ${cartons} cartons of ${productId} to cart.`);
-            
+
             // 1. Persist the updated cart state inside localStorage
             const localCart = JSON.parse(localStorage.getItem('espressgo_cart') || '{}');
             localCart[productId] = (localCart[productId] || 0) + cartons;
             localStorage.setItem('espressgo_cart', JSON.stringify(localCart));
-            
+
             // 2. If currently viewing catalog.html, execute page-level UI refresh
             if (typeof window.updateCart === 'function') {
               window.updateCart(productId, localCart[productId]);
             }
-            
+
             // 3. Display B2B Toast notification
             if (typeof showToast === 'function') {
               const productName = productId === 'espressgo-original' ? 'ESPRESSGO Original' : 'ESPRESSGO Oat Milk';
@@ -659,7 +660,7 @@ document.addEventListener('DOMContentLoaded', () => {
     hasInitialized = true;
 
     // Greeting Message
-    addMessage('agent', "Hello B2B partner! 👋 I am your automated EspressGo Assistant, powered by Meow. Ask me anything about our wholesale pricing, Singapore logistics, caffeine parameters, or procurement! \n\nOr click a shortcut question to begin:");
+    addMessage('agent', "Hello B2B partner! 👋 I am your Smart AI-powered EspressGo Assistant, powered by OpenRouter. Ask me anything about our wholesale pricing, Singapore logistics, caffeine parameters, or procurement! \n\nOr click a shortcut question to begin:");
     renderOptions();
   }
 
