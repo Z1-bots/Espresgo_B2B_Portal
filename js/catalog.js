@@ -12,7 +12,7 @@ buildFooter();
 const user = Auth.getUser();
 
 // Cart state: maps productId → quantity (cartons)
-let cart = {};
+let cart = JSON.parse(localStorage.getItem('espressgo_cart') || '{}');
 
 // Split products into active and coming-soon lists
 const active     = Products.filter(p => p.active);
@@ -166,9 +166,11 @@ function renderAll() {
 /** Updates the cart quantity for a product and refreshes the UI. */
 function updateCart(id, qty) {
   if (qty <= 0) { delete cart[id]; } else { cart[id] = qty; }
+  localStorage.setItem('espressgo_cart', JSON.stringify(cart));
   renderAll();
   updateCheckoutBar();
 }
+window.updateCart = updateCart;
 
 /** Total cartons across all products in the cart. */
 function totalCartons() {
@@ -220,6 +222,7 @@ const modal = document.getElementById('checkout-modal');
 
 document.getElementById('clear-cart-btn').addEventListener('click', () => {
   cart = {};
+  localStorage.setItem('espressgo_cart', JSON.stringify(cart));
   renderAll();
   updateCheckoutBar();
 });
@@ -313,6 +316,7 @@ document.getElementById('modal-place').addEventListener('click', () => {
 
   closeModal();
   cart = {};
+  localStorage.setItem('espressgo_cart', JSON.stringify(cart));
   renderAll();
   updateCheckoutBar();
 
@@ -325,3 +329,4 @@ document.getElementById('modal-place').addEventListener('click', () => {
 
 // ── Initialise ────────────────────────────────────────────
 renderAll();
+updateCheckoutBar();

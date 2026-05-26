@@ -394,7 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="faq-chat-body" id="faq-chat-body"></div>
       <div class="faq-options-panel" id="faq-options-panel">
         <div class="faq-options-title">Click a question to ask</div>
-        <div id="faq-buttons-container" style="display: flex; flex-direction: column; gap: 0.5rem;"></div>
+        <div id="faq-buttons-container"></div>
       </div>
       <!-- AI Typing Input Area -->
       <div class="faq-input-container">
@@ -411,10 +411,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 2. State & FAQ Data definitions
   const faqData = [
-    { q: "How long does delivery take?" },
-    { q: "Can I track my order?" },
-    { q: "Does EspressGo contain dairy or sugar?" },
-    { q: "Is EspressGo halal-certified?" }
+    { 
+      q: "How long does delivery take?",
+      answer: "Singapore logistics typically take **2 to 3 business days** to arrive at your B2B warehouse. We offer free delivery islandwide for wholesale orders of 5 cartons or more!"
+    },
+    { 
+      q: "Does EspressGo contain dairy or sugar?",
+      answer: "We offer two premium B2B variants:\n- **ESPRESSGO Original**: Zero added sugar, dairy-free, and vegan-friendly pure robusta gel.\n- **ESPRESSGO Oat Milk**: Contains organic oat milk (100% dairy-free) and a subtle touch of natural brown sugar."
+    },
+    { 
+      q: "Is EspressGo halal-certified?",
+      answer: "Yes! ESPRESSGO is proud to be **MUIS Halal-certified**, manufactured under clean, fully compliant, and certified standards here in Singapore."
+    },
+    { 
+      q: "Can I track my order?" 
+    }
   ];
 
   const faqWidget = document.getElementById('faq-chat-widget');
@@ -426,6 +437,46 @@ document.addEventListener('DOMContentLoaded', () => {
   const faqUserInput = document.getElementById('faq-user-input');
   const faqSendBtn = document.getElementById('faq-send-btn');
 
+  // 3. Mouse Drag Scroll behavior for Desktop Carousel
+  let isDown = false;
+  let startX;
+  let scrollLeft;
+  let moved = false;
+
+  faqButtonsContainer.addEventListener('mousedown', (e) => {
+    isDown = true;
+    moved = false;
+    startX = e.pageX - faqButtonsContainer.offsetLeft;
+    scrollLeft = faqButtonsContainer.scrollLeft;
+  });
+
+  faqButtonsContainer.addEventListener('mouseleave', () => {
+    isDown = false;
+  });
+
+  faqButtonsContainer.addEventListener('mouseup', () => {
+    isDown = false;
+  });
+
+  faqButtonsContainer.addEventListener('mousemove', (e) => {
+    if (!isDown) return;
+    e.preventDefault();
+    const x = e.pageX - faqButtonsContainer.offsetLeft;
+    const walk = (x - startX) * 1.5; // Drag scroll multiplier
+    if (Math.abs(x - startX) > 5) {
+      moved = true;
+    }
+    faqButtonsContainer.scrollLeft = scrollLeft - walk;
+  });
+
+  // Intercept the click on child elements if moved during drag
+  faqButtonsContainer.addEventListener('click', (e) => {
+    if (moved) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+
   let hasInitialized = false;
 
   // Render clickable question buttons
@@ -433,7 +484,6 @@ document.addEventListener('DOMContentLoaded', () => {
     faqButtonsContainer.innerHTML = faqData.map((item, index) => `
       <button class="faq-option-btn" data-index="${index}">
         <span>${item.q}</span>
-        <span class="faq-option-arrow">➔</span>
       </button>
     `).join('');
 
@@ -508,140 +558,27 @@ document.addEventListener('DOMContentLoaded', () => {
     // 1. Post user message bubble
     addMessage('user', queryText);
 
+    // Check if the user query matches a static pre-defined answer to bypass the AI
+    const matchedFaq = faqData.find(item => item.answer && item.q.toLowerCase().trim() === queryText.toLowerCase().trim());
+    if (matchedFaq) {
+      setTimeout(() => {
+        showTypingIndicator();
+        setTimeout(() => {
+          removeTypingIndicator();
+          addMessage('agent', matchedFaq.answer);
+          setControlsDisabled(false);
+          faqChatBody.scrollTop = faqChatBody.scrollHeight;
+          faqUserInput.focus();
+        }, 600);
+      }, 300);
+      return;
+    }
+
     // 2. Add organic thinking delay delay
     setTimeout(async () => {
       showTypingIndicator();
 
-      // Check if running on localhost or custom offline mode to call OpenRouter directly from browser
-      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.includes('192.168.');
-      const localKey = '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'; // OpenRouter Key
-
-      if (isLocal && localKey) {
-        try {
-          const systemInstruction = `
-You are "EspressGo Helper", the highly professional, friendly, and expert B2B virtual sales assistant for ESPRESSGO (Singapore).
-ESPRESSGO manufactures and sells premium, high-quality cold-brew espresso gel pouches/shots designed for B2B clients, corporate offices, gyms, hotels, events, and cafes.
-
-PRODUCT INFORMATION:
-1. ESPRESSGO Original:
-   - SKU: ESG-OG-001
-   - Classic Vietnamese robusta cold brew gel shot.
-   - Pouch size: 25ml.
-   - Caffeine content: ~65mg caffeine.
-   - Shelf life: 12-month shelf life.
-   - Ingredients: Premium cold brew robusta coffee concentrate, low sugar, no dairy. Completely dairy-free.
-   - B2B Pricing Tiers (per box of 50 pouches):
-     * 1-9 boxes: $120 per box.
-     * 10-29 boxes: $108 per box.
-     * 30+ boxes: $96 per box.
-
-2. ESPRESSGO Oat Milk:
-   - SKU: ESG-OAT-002
-   - Creamy, plant-based oat milk cold brew coffee blend.
-   - Pouch size: 30ml.
-   - Caffeine content: ~60mg caffeine.
-   - Shelf life: 10-month shelf life.
-   - Ingredients: Cold brew coffee, premium plant-based oat milk, lightly sweetened with organic cane sugar. 100% dairy-free and vegan.
-   - B2B Pricing Tiers (per box of 50 pouches):
-     * 1-9 boxes: $130 per box.
-     * 10-29 boxes: $117 per box.
-     * 30+ boxes: $104 per box.
-
-3. ESPRESSGO Matcha (Coming Soon - Q3 2026):
-   - SKU: ESG-MTG-003
-   - Japanese matcha + energy gel shot.
-   - Pricing Tiers (Est): 1-9 boxes: $125.
-
-4. ESPRESSGO Decaf (Coming Soon - Q4 2026):
-   - SKU: ESG-DCF-004
-   - Swiss water process decaf cold brew gel shot (~5mg caffeine).
-   - Pricing Tiers (Est): 1-9 boxes: $115.
-
-B2B LOGISTICS & PROCUREMENT SPECS:
-- Delivery Location: We deliver island-wide in Singapore.
-- Delivery Times: Standard B2B shipping takes 2 to 3 business days. Next-day express shipping is available for orders submitted before 12 PM, subject to a small SGD 15 surcharge.
-- Order Tracking: Customers can track their orders in real-time on their Account dashboard.
-- Halal Status: 100% Halal-certified ingredients. Facility complies with MUIS standards in Singapore. We provide certificate copies on request.
-- Wholesale terms: Minimum B2B order quantity is 1 box (50 pouches). Billing terms can be discussed with Damien.
-
-AI SYSTEM RULES:
-- Tone: Extremely helpful, welcoming, concise, and business-focused (B2B). Keep answers clear, readable, and structured.
-- Formatting: Use standard markdown (e.g., bolding with **text** or lists). You may output standard HTML anchor tags for page linking when relevant:
-  * Link to Catalog page: <a href="catalog.html">Catalog</a>
-  * Link to Account page: <a href="account.html">Account</a>
-  * Link to Contact page: <a href="contact.html">Contact Us</a>
-- Boundary Rule: ONLY answer questions related to ESPRESSGO products, pricing, logistics, coffee, or orders. If a user asks general knowledge questions or unrelated topics, politely guide them back to ESPRESSGO B2B services.
-- Contact: If the user requires custom procurement contracts, wholesale discounts, or customized event partnerships, warmly direct them to chat with Damien Teo via WhatsApp (button is right in the bottom float or links to https://wa.me/6587977961).
-`;
-
-          const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
-          let response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${localKey}`,
-              'HTTP-Referer': 'http://localhost',
-              'X-Title': 'Espresgo B2B Portal'
-            },
-            body: JSON.stringify({
-              model: 'deepseek/deepseek-v4-flash:free',
-              messages: [
-                { role: 'system', content: systemInstruction },
-                { role: 'user', content: queryText }
-              ],
-              temperature: 0.3,
-              max_tokens: 500
-            })
-          });
-
-          // Resilient Fallback: If DeepSeek v4 Flash fails (e.g. Crucible out of credits / HTTP 402)
-          if (!response.ok) {
-            console.warn('DeepSeek v4 Flash endpoint is currently out of credits or rate-limited. Falling back silently to Liquid AI free model...');
-            response = await fetch(endpoint, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localKey}`,
-                'HTTP-Referer': 'http://localhost',
-                'X-Title': 'Espresgo B2B Portal'
-              },
-              body: JSON.stringify({
-                model: 'liquid/lfm-2.5-1.2b-instruct:free',
-                messages: [
-                  { role: 'system', content: systemInstruction },
-                  { role: 'user', content: queryText }
-                ],
-                temperature: 0.3,
-                max_tokens: 500
-              })
-            });
-          }
-
-          removeTypingIndicator();
-
-          if (response.ok) {
-            const data = await response.json();
-            const answer = data.choices[0].message.content;
-            addMessage('agent', answer);
-          } else {
-            const errorMsg = await response.text();
-            console.error('Direct OpenRouter error payload:', errorMsg);
-            addMessage('agent', "Oops! OpenRouter had an issue processing that local request. Double check your API key or internet access!");
-          }
-        } catch (err) {
-          removeTypingIndicator();
-          console.error('Direct local fetch error:', err);
-          addMessage('agent', "I had trouble initiating a connection to OpenRouter. Make sure your internet connection is active!");
-        } finally {
-          setControlsDisabled(false);
-          faqChatBody.scrollTop = faqChatBody.scrollHeight;
-          faqUserInput.focus();
-        }
-        return;
-      }
-
-
-      // Backend route proxy fallback for production (when hosted online)
+      // Backend route proxy for production
       try {
         // Query serverless API endpoint
         const response = await fetch('/api/chat', {
@@ -656,11 +593,48 @@ AI SYSTEM RULES:
 
         if (response.ok) {
           const data = await response.json();
-          addMessage('agent', data.answer || "I parsed the coffee matrix, but found an empty response. Try rephrasing!");
+          const rawAnswer = data.answer || "I parsed the coffee matrix, but found an empty response. Try rephrasing!";
+          
+          // Regex to check for [[ORDER_ACTION: productId, cartons]]
+          const orderMatch = rawAnswer.match(/\[\[ORDER_ACTION:\s*([a-zA-Z0-9_-]+),\s*(\d+)\s*\]\]/);
+          
+          // Strip out structured brackets entirely to keep the visual UI clean
+          const cleanedAnswer = rawAnswer.replace(/\[\[.*?\]\]/g, '').trim();
+          
+          addMessage('agent', cleanedAnswer);
+
+          // If the AI trigger is found, update the cart dynamically!
+          if (orderMatch) {
+            const productId = orderMatch[1];
+            const cartons = parseInt(orderMatch[2], 10);
+            
+            console.log(`🤖 AI Order Trigger matched! Adding ${cartons} cartons of ${productId} to cart.`);
+            
+            // 1. Persist the updated cart state inside localStorage
+            const localCart = JSON.parse(localStorage.getItem('espressgo_cart') || '{}');
+            localCart[productId] = (localCart[productId] || 0) + cartons;
+            localStorage.setItem('espressgo_cart', JSON.stringify(localCart));
+            
+            // 2. If currently viewing catalog.html, execute page-level UI refresh
+            if (typeof window.updateCart === 'function') {
+              window.updateCart(productId, localCart[productId]);
+            }
+            
+            // 3. Display B2B Toast notification
+            if (typeof showToast === 'function') {
+              const productName = productId === 'espressgo-original' ? 'ESPRESSGO Original' : 'ESPRESSGO Oat Milk';
+              showToast("AI Order Drafted!", `Added ${cartons} cartons of ${productName} to your cart.`, "success");
+            }
+          }
         } else {
-          const errorData = await response.json().catch(() => ({}));
-          console.error('Vercel API error payload:', errorData);
-          addMessage('agent', "My serverless coffee brain encountered a temporary glitch. Please feel free to request quick custom assistance directly from Damien via WhatsApp!");
+          console.error('API non-OK response status:', response.status);
+          if (response.status === 404 && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+            addMessage('agent', "⚠️ **Local Server Warning**: Static servers can't run Node.js API routes. To test AI locally, run `npx vercel dev`, or visit the live site: **[espresgo-b2-b-portal.vercel.app](https://espresgo-b2-b-portal.vercel.app/catalog)**!");
+          } else if (response.status === 502) {
+            addMessage('agent', "☕ Our AI brain is taking a quick coffee break — we've hit today's free request limit across all our AI providers!\n\nFor immediate B2B assistance, Damien is online now on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>. Otherwise, the AI will be refreshed and ready again tomorrow! 🙏");
+          } else {
+            addMessage('agent', "Something went wrong on our end. Please reach out to Damien directly on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a> for immediate B2B support!");
+          }
         }
       } catch (error) {
         removeTypingIndicator();
