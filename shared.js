@@ -917,7 +917,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div>
             <div class="faq-status-title">EspressGo Helper</div>
             <div class="faq-status-sub">
-              <span class="pulse-dot" style="width: 7px; height: 7px; background: #22c55e;"></span>
+              <span class="pulse-dot" style="width:7px;height:7px;background:#22c55e;"></span>
               Auto-Reply Agent · Online
             </div>
           </div>
@@ -952,20 +952,20 @@ document.addEventListener('DOMContentLoaded', () => {
   document.body.insertAdjacentHTML('beforeend', socialHTML);
 
   const faqData = [
-    { 
-      q: "How long does delivery take?",
-      answer: "Singapore logistics typically take **2 to 3 business days** to arrive at your B2B warehouse. We offer free delivery islandwide for wholesale orders of 5 cartons or more!"
+    {
+      q: 'How long does delivery take?',
+      answer: 'Singapore logistics typically take **2 to 3 business days** to arrive at your B2B warehouse. We offer free delivery islandwide for wholesale orders of 5 cartons or more!'
     },
-    { 
-      q: "Does EspressGo contain dairy or sugar?",
-      answer: "We offer two premium B2B variants:\n- **ESPRESSGO Original**: Zero added sugar, dairy-free, and vegan-friendly pure robusta gel.\n- **ESPRESSGO Oat Milk**: Contains organic oat milk (100% dairy-free) and a subtle touch of natural brown sugar."
+    {
+      q: 'Does EspressGo contain dairy or sugar?',
+      answer: 'We offer two premium B2B variants:\n- **ESPRESSGO Original**: dairy-free robusta gel.\n- **ESPRESSGO Oat Milk**: contains oat milk, is dairy-free, and has a lightly sweetened profile.'
     },
-    { 
-      q: "Is EspressGo halal-certified?",
-      answer: "Yes! ESPRESSGO is proud to be **MUIS Halal-certified**, manufactured under clean, fully compliant, and certified standards here in Singapore."
+    {
+      q: 'Is EspressGo halal-certified?',
+      answer: 'ESPRESSGO uses Halal-friendly ingredients. For official certificates or procurement documents, please contact Damien directly through WhatsApp.'
     },
-    { 
-      q: "Can I track my order?" 
+    {
+      q: 'Can I track my order?'
     }
   ];
 
@@ -1139,12 +1139,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (response.ok) {
           const data = await response.json();
-          const rawAnswer = data.answer || "I parsed the coffee matrix, but found an empty response. Try rephrasing!";
-          
-          // Regex to check for [[ORDER_ACTION: productId, cartons]]
+
+          const rawAnswer =
+            data.answer ||
+            'I parsed the coffee matrix, but found an empty response. Try rephrasing!';
+
           const orderMatch = rawAnswer.match(/\[\[ORDER_ACTION:\s*([a-zA-Z0-9_-]+),\s*(\d+)\s*\]\]/);
-          
-          // Strip out structured brackets entirely to keep the visual UI clean
+
           const cleanedAnswer = rawAnswer.replace(/\[\[.*?\]\]/g, '').trim();
 
           addMessage('agent', cleanedAnswer);
@@ -1154,18 +1155,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const cartons = parseInt(orderMatch[2], 10);
 
             console.log(`🤖 AI Order Trigger matched! Adding ${cartons} cartons of ${productId} to cart.`);
-            
-            // 1. Persist the updated cart state inside localStorage
+
             const localCart = JSON.parse(localStorage.getItem('espressgo_cart') || '{}');
             localCart[productId] = (localCart[productId] || 0) + cartons;
             localStorage.setItem('espressgo_cart', JSON.stringify(localCart));
-            
-            // 2. If currently viewing catalog.html, execute page-level UI refresh
+
             if (typeof window.updateCart === 'function') {
               window.updateCart(productId, localCart[productId]);
             }
-            
-            // 3. Display B2B Toast notification
+
             if (typeof showToast === 'function') {
               const productName =
                 productId === 'espressgo-original'
@@ -1181,6 +1179,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         } else {
           console.error('API non-OK response status:', response.status);
+<<<<<<< Updated upstream
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
@@ -1260,6 +1259,24 @@ document.addEventListener('DOMContentLoaded', () => {
             );
           } else {
 >>>>>>> Stashed changes
+=======
+
+          if (
+            response.status === 404 &&
+            (window.location.hostname === 'localhost' ||
+             window.location.hostname === '127.0.0.1')
+          ) {
+            addMessage(
+              'agent',
+              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
+            );
+          } else if (response.status === 502) {
+            addMessage(
+              'agent',
+              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
+            );
+          } else {
+>>>>>>> Stashed changes
             addMessage(
               'agent',
               "Something went wrong on our end. Please reach out to Damien directly on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a> for immediate B2B support."
@@ -1267,6 +1284,9 @@ document.addEventListener('DOMContentLoaded', () => {
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 =======
 >>>>>>> Stashed changes
@@ -1303,8 +1323,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     hasInitialized = true;
 
-    // Greeting Message
-    addMessage('agent', "Hello B2B partner! 👋 I am your automated EspressGo Assistant, powered by Meow. Ask me anything about our wholesale pricing, Singapore logistics, caffeine parameters, or procurement! \n\nOr click a shortcut question to begin:");
+    addMessage(
+      'agent',
+      'Hello B2B partner! 👋 I am your automated EspressGo Assistant. Ask me anything about wholesale pricing, Singapore delivery, caffeine, products, or procurement.\n\nOr click a shortcut question to begin:'
+    );
+
     renderOptions();
   }
 
