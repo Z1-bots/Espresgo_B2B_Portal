@@ -629,11 +629,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
           console.error('API non-OK response status:', response.status);
           if (response.status === 404 && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-            addMessage('agent', "⚠️ **Local Server Warning**: Static servers can't run Node.js API routes. To test AI locally, run `npx vercel dev`, or visit the live site: **[espresgo-b2-b-portal.vercel.app](https://espresgo-b2-b-portal.vercel.app/catalog)**!");
-          } else if (response.status === 502) {
-            addMessage('agent', "☕ Our AI brain is taking a quick coffee break — we've hit today's free request limit across all our AI providers!\n\nFor immediate B2B assistance, Damien is online now on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>. Otherwise, the AI will be refreshed and ready again tomorrow! 🙏");
+            addMessage('agent', "⚠️ **Local Server Route Warning**: It looks like you are running a static local server (like Python's `http.server` or VS Code Live Server). Static servers **cannot** run Node.js backend routes (like `/api/chat.js`), which causes this local 404 error. \n\nTo test the generative AI locally, please run `npx vercel dev` in your command line, or visit the live production site to try it out: **[espresgo-b2-b-portal.vercel.app](https://espresgo-b2-b-portal.vercel.app/catalog)**! 👋");
           } else {
-            addMessage('agent', "Something went wrong on our end. Please reach out to Damien directly on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a> for immediate B2B support!");
+            addMessage('agent', "My serverless coffee brain encountered a temporary glitch. Please feel free to request quick custom assistance directly from Damien via WhatsApp!");
           }
         }
       } catch (error) {
