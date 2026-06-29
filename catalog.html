@@ -8,130 +8,123 @@
 
   <meta
     name="description"
-    content="Browse ESPRESSGO wholesale products with volume pricing. Order espresso gel shots in bulk with tiered discounts."/>
+    content="Browse ESPRESSGO wholesale products, carton pricing, and B2B ordering options."/>
 
-  <!-- Shared design system -->
   <link rel="stylesheet" href="shared.css"/>
-
-  <!-- Page-specific styles -->
   <link rel="stylesheet" href="css/catalog.css"/>
 </head>
 
 <body>
 
-  <!-- Navigation injected by buildNav() -->
   <div id="nav-placeholder"></div>
 
   <main class="page-wrap" id="main-content">
 
-    <!-- ── Hero ──────────────────────────────────────────── -->
-    <div class="hero" aria-labelledby="catalog-heading">
+    <section class="hero" aria-labelledby="catalog-heading">
       <div class="hero-inner">
 
         <div class="hero-badge">
-          Wholesale Catalog
+          ☕ B2B Catalog
         </div>
 
         <h1 id="catalog-heading">
-          Bulk pricing on every order.
+          Wholesale espresso gel shots.
         </h1>
 
         <p>
-          Per carton of 50 pouches · Volume discounts applied automatically as you order.
+          Browse ESPRESSGO carton options, compare volume pricing, and build your B2B order.
         </p>
 
-      </div>
-
-      <!-- Product feature chips -->
-      <div
-        style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1.5rem;position:relative;z-index:1;">
-
-        <span class="chip">⚡ ~65mg caffeine</span>
-        <span class="chip">❄️ No fridge needed</span>
-        <span class="chip">🕐 Up to 12-month shelf life</span>
-        <span class="chip">📦 Pocket-sized pouch</span>
+        <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1rem;">
+          <span class="chip">1 carton = 50 pouches</span>
+          <span class="chip">Volume pricing</span>
+          <span class="chip">Singapore B2B supply</span>
+        </div>
 
       </div>
-    </div>
+    </section>
 
-    <!-- ── Active product cards ──────────────────────────── -->
-    <!-- Populated by renderAll() in catalog.js -->
-    <div
+    <section
       id="products-list"
+      class="products-grid"
       role="list"
-      aria-label="Active products">
-    </div>
+      aria-label="ESPRESSGO products">
+    </section>
 
-    <!-- ── Coming soon section ───────────────────────────── -->
-    <!-- Shown only when comingSoon products exist -->
-    <div
+    <section
       id="coming-soon-section"
-      style="margin-bottom:2.5rem;display:none;">
+      style="display:none;margin-top:2rem;"
+      aria-labelledby="coming-soon-heading">
 
-      <div
-        style="display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem;">
+      <div style="display:flex;align-items:end;justify-content:space-between;gap:1rem;margin-bottom:1rem;">
 
-        <h2 style="color:var(--brown);font-size:1.25rem;">
-          Coming Soon
-        </h2>
+        <div>
+          <div class="section-kicker">Coming Soon</div>
 
-        <span
-          class="chip"
-          style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;">
-          On the Roadmap
-        </span>
+          <h2
+            id="coming-soon-heading"
+            style="margin:.25rem 0 0;color:var(--brown);">
+            Future ESPRESSGO variants
+          </h2>
+        </div>
 
       </div>
 
-      <div class="coming-grid" id="coming-grid"></div>
+      <div
+        id="coming-grid"
+        class="coming-grid"
+        role="list"
+        aria-label="Coming soon products">
+      </div>
 
-    </div>
+    </section>
 
   </main>
 
-  <!-- ── Sticky checkout bar ─────────────────────────────── -->
-  <!-- Appears when cart has items -->
   <div
     id="checkout-bar"
+    class="checkout-bar"
     role="region"
-    aria-label="Shopping cart"
-    aria-live="polite">
+    aria-label="Cart summary">
 
     <div class="checkout-inner">
 
-      <div style="display:flex;align-items:center;gap:.75rem;">
+      <div style="display:flex;align-items:center;gap:.75rem;min-width:0;">
 
-        <div class="cart-icon-wrap">
-          <div class="cart-icon">🛒</div>
-          <span class="cart-badge" id="cart-count-badge">0</span>
+        <div
+          id="cart-count-badge"
+          class="cart-count-badge">
+          0
         </div>
 
-        <div>
+        <div style="min-width:0;">
           <div
             id="cart-summary-text"
-            style="font-size:13px;color:var(--brown);">
+            style="font-size:13px;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            0 cartons
           </div>
 
           <div
             id="cart-total-text"
-            style="font-size:12px;color:var(--muted);">
+            style="font-size:12px;color:#A98B68;">
+            SGD $0.00 total
           </div>
         </div>
 
       </div>
 
-      <div style="display:flex;align-items:center;gap:.75rem;">
+      <div style="display:flex;gap:.5rem;align-items:center;">
 
         <button
           id="clear-cart-btn"
-          class="btn-ghost btn-sm"
+          class="btn-ghost"
           type="button">
           Clear
         </button>
 
         <button
           id="checkout-btn"
-          class="btn-dark"
+          class="btn-amber"
           type="button">
           Checkout →
         </button>
@@ -141,72 +134,70 @@
     </div>
   </div>
 
-  <!-- ── Order confirmation modal ───────────────────────── -->
   <div
-    class="modal-overlay"
     id="checkout-modal"
+    class="modal-backdrop"
     role="dialog"
     aria-modal="true"
-    aria-labelledby="modal-title">
+    aria-labelledby="checkout-modal-title">
 
-    <div class="modal-box">
+    <div class="modal-card">
 
       <div class="modal-header">
 
         <div>
-          <h2 id="modal-title">
-            Confirm Order
-          </h2>
+          <div class="section-kicker">Confirm Order</div>
 
-          <p>
-            Review before submitting
-          </p>
+          <h2
+            id="checkout-modal-title"
+            style="margin:.25rem 0 0;color:var(--brown);">
+            Review your B2B order
+          </h2>
         </div>
 
         <button
-          class="modal-close"
           id="modal-close"
-          aria-label="Close"
-          type="button">
+          class="modal-close"
+          type="button"
+          aria-label="Close checkout modal">
           ×
         </button>
 
       </div>
 
-      <!-- Cart items list -->
-      <div
-        class="modal-items"
-        id="modal-items"
-        role="list">
-      </div>
+      <div class="modal-body">
 
-      <!-- Totals: cartons, pouches, grand total -->
-      <div
-        class="modal-totals"
-        id="modal-totals">
-      </div>
+        <div
+          id="modal-items"
+          class="modal-items"
+          role="list"
+          aria-label="Order items">
+        </div>
 
-      <!-- Delivery address note -->
-      <div
-        class="modal-delivery"
-        id="modal-delivery">
+        <div
+          id="modal-totals"
+          class="modal-totals">
+        </div>
 
-        📦 <span id="delivery-text"></span>
+        <p
+          id="delivery-text"
+          style="font-size:12px;color:var(--muted);margin-top:1rem;">
+        </p>
 
       </div>
 
       <div class="modal-actions">
 
         <button
-          class="btn-ghost btn-full"
           id="modal-back"
+          class="btn-ghost"
           type="button">
-          Go Back
+          Back
         </button>
 
         <button
-          class="btn-dark btn-full"
           id="modal-place"
+          class="btn-dark"
           type="button">
           ✓ Place Order
         </button>
@@ -216,47 +207,97 @@
     </div>
   </div>
 
-  <!-- ── Order success banner ────────────────────────────── -->
-  <!-- Bottom-centre, auto-dismisses -->
   <div
     id="order-success"
+    class="order-success"
+    style="display:none;"
     role="status"
     aria-live="polite">
 
-    <div
-      style="width:32px;height:32px;background:rgba(34,197,94,.2);border-radius:10px;display:flex;align-items:center;justify-content:center;">
-      ✅
-    </div>
+    <div class="toast-icon">✓</div>
 
     <div>
-      <div style="font-size:14px;">
-        Order placed successfully!
-      </div>
-
-      <div
-        style="font-size:12px;color:var(--muted);margin-top:2px;">
-        Track it in your Account page.
-      </div>
+      <div class="toast-title">Order submitted</div>
+      <div class="toast-sub">Your order has been saved successfully.</div>
     </div>
 
   </div>
 
-  <!-- Footer injected by buildFooter() -->
   <div id="footer-placeholder"></div>
 
-  <!-- Spacer so checkout bar does not cover last product -->
-  <div style="height:5rem;"></div>
-
-  <!-- Supabase client library -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-  <!-- Your Supabase project URL/key -->
   <script src="supabase-config.js"></script>
-
-  <!-- Shared utilities -->
   <script src="shared.js"></script>
 
-  <!-- Page logic: cart management, modal, order submission -->
+  <!--
+    Full MFA guard for catalog.html
+
+    Rules:
+    1. Not logged in → login.html
+    2. Logged in but no MFA factor → mfa-setup.html
+    3. MFA factor exists but current session not verified → mfa-verify.html
+    4. MFA verified → allow catalog
+  -->
+  <script>
+    (async function guardCatalogMfa() {
+      try {
+        if (typeof sb === 'undefined') {
+          console.warn('Supabase client missing.');
+          return;
+        }
+
+        const { data: sessionData, error: sessionError } =
+          await sb.auth.getSession();
+
+        if (sessionError) {
+          console.warn('Session check failed:', sessionError);
+          return;
+        }
+
+        if (!sessionData.session) {
+          localStorage.setItem('redirectAfterLogin', 'catalog.html');
+          window.location.replace('login.html');
+          return;
+        }
+
+        const { data: factorsData, error: factorsError } =
+          await sb.auth.mfa.listFactors();
+
+        if (factorsError) {
+          console.warn('MFA factor check failed:', factorsError);
+          return;
+        }
+
+        const verifiedTotpFactor = (factorsData.totp || [])
+          .find(factor => factor.status === 'verified');
+
+        if (!verifiedTotpFactor) {
+          localStorage.setItem('redirectAfterMfaSetup', 'catalog.html');
+          window.location.replace('mfa-setup.html');
+          return;
+        }
+
+        const { data: aalData, error: aalError } =
+          await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+
+        if (aalError) {
+          console.warn('MFA AAL check failed:', aalError);
+          return;
+        }
+
+        if (aalData.nextLevel === 'aal2' && aalData.currentLevel !== 'aal2') {
+          localStorage.setItem('redirectAfterLogin', 'catalog.html');
+          window.location.replace('mfa-verify.html');
+          return;
+        }
+
+        console.log('Catalog access allowed. MFA verified or not required.', aalData);
+      } catch (error) {
+        console.warn('Catalog MFA guard failed:', error);
+      }
+    })();
+  </script>
+
   <script src="js/catalog.js"></script>
 
 </body>

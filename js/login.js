@@ -1,20 +1,20 @@
 /* ============================================================
-   login.js — ESPRESSGO B2B Login / Register / OTP / Password Reset
+   login.js — ESPRESSGO B2B Login / Register / OTP / Reset / MFA
 
-   Features:
-   - Email/password sign in
-   - Buyer registration
-   - 8-digit Email OTP login
-   - Optional Phone OTP login
-   - Forgot password reset link
-   - New password update after reset link
-   - Redirect fix for Supabase auth links
-   - Auto-repair missing public.profiles row after login
+   Final intended flow:
+   1. New user signs up
+   2. User is signed out and returned to login page
+   3. User logs in with email + password
+   4. If no MFA factor exists → mfa-setup.html
+   5. After MFA setup → user is signed out and returned to login
+   6. User logs in again
+   7. If MFA exists but not verified for this session → mfa-verify.html
+   8. After MFA verification → catalog.html
 
    Depends on:
-   1. Supabase JS CDN
-   2. supabase-config.js
-   3. shared.js
+   - Supabase JS CDN
+   - supabase-config.js
+   - shared.js
    ============================================================ */
 
 
@@ -24,18 +24,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 function initLoginPage() {
-  /* ==========================================================
-     Page state
-     ========================================================== */
-
   let isLogin = true;
   let otpMode = 'email';
   let sentOtpMode = null;
   let sentOtpDestination = null;
   let passwordRecoveryMode = false;
 
-  // Your Supabase Email OTP setting is 6 digits.
-  const EMAIL_OTP_LENGTH = 6;
+  const EMAIL_OTP_MAX_LENGTH = 8;
 
   const $ = (id) => document.getElementById(id);
 
@@ -60,7 +55,7 @@ function initLoginPage() {
 
 
   /* ==========================================================
-     DOM helpers
+     Basic helpers
      ========================================================== */
 
   function safeText(id, value) {
@@ -92,6 +87,18 @@ function initLoginPage() {
 
   function getLoginRedirectUrl() {
     return window.location.origin + window.location.pathname;
+  }
+
+
+  function getPendingRedirectTarget() {
+    return localStorage.getItem('redirectAfterLogin') || 'catalog.html';
+  }
+
+
+  function getRedirectTargetAndClear() {
+    const redirectTo = localStorage.getItem('redirectAfterLogin') || 'catalog.html';
+    localStorage.removeItem('redirectAfterLogin');
+    return redirectTo;
   }
 
 
@@ -231,12 +238,10 @@ function initLoginPage() {
       return cleaned;
     }
 
-    // Singapore mobile number: 91234567 → +6591234567
     if (/^[89]\d{7}$/.test(cleaned)) {
       return '+65' + cleaned;
     }
 
-    // Singapore mobile with country code but no plus: 6591234567
     if (/^65[89]\d{7}$/.test(cleaned)) {
       return '+' + cleaned;
     }
@@ -247,18 +252,6 @@ function initLoginPage() {
 
   function isValidE164Phone(phone) {
     return /^\+[1-9]\d{7,14}$/.test(phone);
-  }
-
-
-  function getRedirectTarget() {
-    const redirectTo = localStorage.getItem('redirectAfterLogin') || 'catalog.html';
-    localStorage.removeItem('redirectAfterLogin');
-    return redirectTo;
-  }
-
-
-  function redirectAfterSuccessfulLogin() {
-    window.location.href = getRedirectTarget();
   }
 
 
@@ -316,9 +309,7 @@ function initLoginPage() {
 
 
   /* ==========================================================
-     Profile repair helper
-     This fixes:
-     "Login succeeded, but your buyer profile was not found."
+     Profile repair
      ========================================================== */
 
   async function ensureProfileForCurrentUser(fallbackProfile = {}) {
@@ -389,8 +380,68 @@ function initLoginPage() {
   }
 
 
+  async function getVerifiedTotpFactor() {
+    const { data, error } = await sb.auth.mfa.listFactors();
+
+    if (error) {
+      throw error;
+    }
+
+    const factors = data.totp || [];
+
+    return factors.find(factor => factor.status === 'verified') || null;
+  }
+
+
   /* ==========================================================
-     Inject OTP login and password reset panels
+     Final full MFA routing logic
+     ========================================================== */
+
+  async function continueAfterPrimaryLogin(fallbackProfile = {}) {
+    await ensureProfileForCurrentUser(fallbackProfile);
+
+    const profile = await Auth.refreshUser();
+
+    if (!profile) {
+      throw new Error('Login succeeded, but your buyer profile could not be loaded.');
+    }
+
+    const verifiedTotpFactor = await getVerifiedTotpFactor();
+
+    /*
+      New user / user without MFA:
+      They are not allowed to catalog yet.
+      Send them to MFA setup page first.
+    */
+    if (!verifiedTotpFactor) {
+      localStorage.setItem('redirectAfterMfaSetup', getPendingRedirectTarget());
+      window.location.href = 'mfa-setup.html';
+      return;
+    }
+
+    /*
+      User has MFA enabled:
+      Check if this current session has completed MFA.
+    */
+    const { data: aalData, error: aalError } =
+      await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+
+    if (aalError) {
+      throw aalError;
+    }
+
+    if (aalData.nextLevel === 'aal2' && aalData.currentLevel !== 'aal2') {
+      localStorage.setItem('redirectAfterLogin', getPendingRedirectTarget());
+      window.location.href = 'mfa-verify.html';
+      return;
+    }
+
+    window.location.href = getRedirectTargetAndClear();
+  }
+
+
+  /* ==========================================================
+     Inject OTP and reset panels
      ========================================================== */
 
   function injectOtpAndResetPanels() {
@@ -411,7 +462,7 @@ function initLoginPage() {
           <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.75rem;">
             <div>
               <div style="font-size:13px;color:var(--brown);font-weight:600;">
-                2FA / OTP Login
+                Email / Phone OTP Login
               </div>
 
               <div style="font-size:11px;color:var(--muted);">
@@ -421,7 +472,7 @@ function initLoginPage() {
 
             <span
               style="font-size:10px;background:#FEF3E2;color:var(--amber);border:1px solid #F3D6AA;border-radius:999px;padding:.2rem .55rem;white-space:nowrap;">
-              Secure Code
+              OTP Login
             </span>
           </div>
 
@@ -471,14 +522,14 @@ function initLoginPage() {
 
             <div class="field">
               <label id="otp-code-label" for="otp-code">
-                6-digit OTP Code
+                Email OTP Code
               </label>
 
               <input
                 class="input"
                 id="otp-code"
                 inputmode="numeric"
-                maxlength="6"
+                maxlength="8"
                 placeholder="123456"
                 autocomplete="one-time-code"/>
             </div>
@@ -560,11 +611,7 @@ function initLoginPage() {
 
 
   /* ==========================================================
-     Supabase auth redirect listener
-     Handles:
-     - Email confirmation link
-     - Magic link callback
-     - Password recovery callback
+     Auth redirect listener
      ========================================================== */
 
   function setupAuthRedirectListener() {
@@ -572,6 +619,8 @@ function initLoginPage() {
       console.error('Supabase client is missing. Check supabase-config.js.');
       return;
     }
+
+    const currentHash = window.location.hash || '';
 
     sb.auth.onAuthStateChange(async (event) => {
       console.log('Supabase auth event:', event);
@@ -589,40 +638,64 @@ function initLoginPage() {
         return;
       }
 
-      if (event === 'SIGNED_IN') {
-        if (passwordRecoveryMode) return;
+      /*
+        If user clicks a signup confirmation email, Supabase may create a session.
+        Your requested flow says signup/confirmation should return to login page first,
+        so we sign out and ask them to login manually.
+      */
+      if (
+        event === 'SIGNED_IN' &&
+        currentHash.includes('access_token') &&
+        currentHash.includes('type=signup')
+      ) {
+        await sb.auth.signOut();
 
+        history.replaceState(
+          null,
+          '',
+          window.location.origin + window.location.pathname
+        );
+
+        showServerInfo('Email confirmed successfully. Please sign in to continue with MFA setup.');
+
+        showToast(
+          'Email confirmed',
+          'Please sign in to continue with MFA setup.'
+        );
+
+        return;
+      }
+
+      /*
+        Only handle SIGNED_IN from auth links here.
+        Normal email/password login is handled inside the submit function.
+      */
+      if (
+        event === 'SIGNED_IN' &&
+        currentHash.includes('access_token') &&
+        !passwordRecoveryMode
+      ) {
         try {
-          await ensureProfileForCurrentUser();
-          const profile = await Auth.refreshUser();
+          history.replaceState(
+            null,
+            '',
+            window.location.origin + window.location.pathname
+          );
 
-          if (profile) {
-            history.replaceState(
-              null,
-              '',
-              window.location.origin + window.location.pathname
-            );
-
-            redirectAfterSuccessfulLogin();
-          }
+          await continueAfterPrimaryLogin();
         } catch (error) {
-          console.error('Auth callback profile repair failed:', error);
+          console.error('Auth callback handling failed:', error);
           showServerError(error);
         }
       }
     });
 
-    const hash = window.location.hash || '';
-
-    if (
-      hash.includes('access_token') &&
-      !hash.includes('type=recovery')
-    ) {
+    if (currentHash.includes('access_token') && !currentHash.includes('type=recovery')) {
       showServerInfo('Signing you in. Please wait…');
     }
 
-    if (hash.includes('error=')) {
-      const params = new URLSearchParams(hash.replace(/^#/, ''));
+    if (currentHash.includes('error=')) {
+      const params = new URLSearchParams(currentHash.replace(/^#/, ''));
       const description =
         params.get('error_description') ||
         params.get('error') ||
@@ -660,9 +733,9 @@ function initLoginPage() {
       try {
         const profile = await Auth.refreshUser();
 
-        if (profile && !passwordRecoveryMode) {
-          window.location.href = 'catalog.html';
-        }
+        if (!profile) return;
+
+        await continueAfterPrimaryLogin();
       } catch (error) {
         console.warn('No active session found:', error);
       }
@@ -684,7 +757,7 @@ function initLoginPage() {
 
 
   /* ==========================================================
-     Decorative pouch trio
+     Decorative pouches
      ========================================================== */
 
   function renderDecorativePouches() {
@@ -741,7 +814,7 @@ function initLoginPage() {
 
 
   /* ==========================================================
-     Login/Register switch
+     Login/register switch
      ========================================================== */
 
   function switchMode(toLogin) {
@@ -805,7 +878,7 @@ function initLoginPage() {
 
 
   /* ==========================================================
-     Password show/hide
+     Password UI
      ========================================================== */
 
   function setupPasswordToggles() {
@@ -830,10 +903,6 @@ function initLoginPage() {
     });
   }
 
-
-  /* ==========================================================
-     Password strength
-     ========================================================== */
 
   function setupPasswordStrength() {
     const passwordInput = $('f-password');
@@ -933,10 +1002,6 @@ function initLoginPage() {
   }
 
 
-  /* ==========================================================
-     New password form after recovery link
-     ========================================================== */
-
   function setupPasswordResetForm() {
     const saveBtn = $('save-new-password-btn');
 
@@ -971,19 +1036,22 @@ function initLoginPage() {
           return;
         }
 
-        await ensureProfileForCurrentUser();
-        await Auth.refreshUser();
+        await sb.auth.signOut();
 
-        showInlineStatus('reset-status', 'Password updated successfully. Redirecting…', 'success');
+        showInlineStatus(
+          'reset-status',
+          'Password updated successfully. Please sign in again.',
+          'success'
+        );
 
         showToast(
           'Password updated',
-          'You can now use your new password.'
+          'Please sign in again using your new password.'
         );
 
         setTimeout(() => {
-          window.location.href = 'catalog.html';
-        }, 1000);
+          window.location.href = 'login.html';
+        }, 1200);
       } catch (error) {
         console.error('Update password failed:', error);
         showInlineStatus('reset-status', getReadableError(error), 'error');
@@ -1037,6 +1105,10 @@ function initLoginPage() {
           verifyOtpCode();
         }
       });
+
+      otpCode.addEventListener('input', () => {
+        otpCode.value = otpCode.value.replace(/\D/g, '').slice(0, EMAIL_OTP_MAX_LENGTH);
+      });
     }
 
     setOtpMode('email');
@@ -1072,14 +1144,14 @@ function initLoginPage() {
 
     if (codeInput) {
       codeInput.value = '';
-      codeInput.maxLength = mode === 'email' ? EMAIL_OTP_LENGTH : 8;
-      codeInput.placeholder = mode === 'email' ? '12345678' : '123456';
+      codeInput.maxLength = mode === 'email' ? EMAIL_OTP_MAX_LENGTH : 8;
+      codeInput.placeholder = '123456';
     }
 
     safeText(
       'otp-code-label',
       mode === 'email'
-        ? '8-digit OTP Code'
+        ? 'Email OTP Code'
         : 'SMS OTP Code'
     );
 
@@ -1158,7 +1230,7 @@ function initLoginPage() {
       showInlineStatus(
         'otp-status',
         otpMode === 'email'
-          ? 'OTP sent. Check your email inbox for the 8-digit code.'
+          ? 'OTP sent. Check your email inbox for the code.'
           : 'OTP sent. Check your SMS messages.',
         'success'
       );
@@ -1194,24 +1266,9 @@ function initLoginPage() {
       return;
     }
 
-    if (sentOtpMode === 'email') {
-      const emailOtpPattern = new RegExp(`^\\d{${EMAIL_OTP_LENGTH}}$`);
-
-      if (!emailOtpPattern.test(token)) {
-        showInlineStatus(
-          'otp-status',
-          `Enter the ${EMAIL_OTP_LENGTH}-digit email OTP code.`,
-          'error'
-        );
-        return;
-      }
-    }
-
-    if (sentOtpMode === 'phone') {
-      if (!/^\d{6,8}$/.test(token)) {
-        showInlineStatus('otp-status', 'Enter the SMS OTP code.', 'error');
-        return;
-      }
+    if (!/^\d{6,8}$/.test(token)) {
+      showInlineStatus('otp-status', 'Enter the OTP code from your inbox or SMS.', 'error');
+      return;
     }
 
     verifyBtn.disabled = true;
@@ -1238,24 +1295,10 @@ function initLoginPage() {
         return;
       }
 
-      await ensureProfileForCurrentUser();
-      const profile = await Auth.refreshUser();
+      await continueAfterPrimaryLogin({
+        email: sentOtpDestination
+      });
 
-      if (!profile) {
-        showInlineStatus(
-          'otp-status',
-          'OTP verified, but no buyer profile was found.',
-          'error'
-        );
-
-        return;
-      }
-
-      showInlineStatus('otp-status', 'OTP verified. Signing you in…', 'success');
-
-      setTimeout(() => {
-        redirectAfterSuccessfulLogin();
-      }, 500);
     } catch (error) {
       console.error('Verify OTP failed:', error);
       showInlineStatus('otp-status', getReadableError(error), 'error');
@@ -1267,7 +1310,7 @@ function initLoginPage() {
 
 
   /* ==========================================================
-     Main email/password login and register form
+     Main login/register form
      ========================================================== */
 
   function setupMainAuthForm() {
@@ -1346,23 +1389,20 @@ function initLoginPage() {
             return;
           }
 
-          await ensureProfileForCurrentUser({
+          await continueAfterPrimaryLogin({
             email
           });
 
-          const profile = await Auth.refreshUser();
-
-          if (!profile) {
-            showServerError('Login succeeded, but your buyer profile could not be loaded.');
-            resetSubmitButton();
-            return;
-          }
-
-          redirectAfterSuccessfulLogin();
           return;
         }
 
-        const { data, error } = await sb.auth.signUp({
+        /*
+          Register new buyer account.
+          Important:
+          Even if Supabase creates an immediate session,
+          we force sign out so the user must return to login page first.
+        */
+        const { error } = await sb.auth.signUp({
           email,
           password,
           options: {
@@ -1382,27 +1422,13 @@ function initLoginPage() {
           return;
         }
 
-        if (data.session) {
-          await ensureProfileForCurrentUser({
-            email,
-            contactName,
-            companyName,
-            businessType
-          });
+        await sb.auth.signOut();
 
-          const profile = await Auth.refreshUser();
-
-          if (profile) {
-            redirectAfterSuccessfulLogin();
-            return;
-          }
-        }
-
-        showServerInfo('Account created. Please check your email and confirm your account before signing in.');
+        showServerInfo('Account created. Please sign in to continue with MFA setup.');
 
         showToast(
           'Account created',
-          'Please check your email and confirm your account before signing in.'
+          'Please sign in to continue with MFA setup.'
         );
 
         const signInTab = $('tab-signin');
@@ -1423,7 +1449,7 @@ function initLoginPage() {
             if (emailInput) {
               emailInput.value = email;
             }
-          }, 1200);
+          }, 800);
         }
 
         resetSubmitButton();
