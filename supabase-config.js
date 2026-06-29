@@ -1,43 +1,22 @@
 /* ============================================================
    supabase-config.js — ESPRESSGO Supabase Client
-
-   IMPORTANT:
-   - This file is used by frontend pages.
-   - Use your Supabase Project URL.
-   - Use your anon/public key only.
-   - DO NOT use the service_role key here.
    ============================================================ */
 
+const SUPABASE_URL = "https://aynwtgkmrymnrhzashtf.supabase.co";
 
-/* ============================================================
-   Replace these two values with your own Supabase details
-   ============================================================ */
+const SUPABASE_KEY = "sb_publishable_stk65gIeVJPmtvdRM4tKDQ_FRIyop5P";
 
-const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co";
-
-const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
-
-
-/* ============================================================
-   Create Supabase client
-   ============================================================ */
-
-const sb = supabase.createClient(
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true
-    }
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
   }
-);
+});
 
-
-/* ============================================================
-   Optional connection check
-   This helps you confirm in browser console that Supabase loaded.
-   ============================================================ */
+window.sb = sb;
+window.supabaseClient = sb;
 
 console.log("ESPRESSGO Supabase client loaded.");
+console.log("Supabase URL:", SUPABASE_URL);
+console.log("Supabase key starts with:", SUPABASE_KEY.slice(0, 18));

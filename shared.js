@@ -61,9 +61,8 @@ const Auth = {
 
   clearUser() {
     localStorage.removeItem(this._profileKey);
-
-    // Remove old demo auth key if it still exists from earlier versions.
     localStorage.removeItem('espressgo_user');
+    localStorage.removeItem('espressgo_admin');
   },
 
   isLoggedIn() {
@@ -84,7 +83,8 @@ const Auth = {
       return null;
     }
 
-    const userId = sessionData.session.user.id;
+    const authUser = sessionData.session.user;
+    const userId = authUser.id;
 
     const { data: profile, error } = await sb
       .from('profiles')
@@ -100,10 +100,10 @@ const Auth = {
 
     const normalizedProfile = {
       id: profile.id,
-      email: profile.email,
-      contactName: profile.contact_name,
-      companyName: profile.company_name,
-      businessType: profile.business_type,
+      email: profile.email || authUser.email || '',
+      contactName: profile.contact_name || '',
+      companyName: profile.company_name || '',
+      businessType: profile.business_type || '',
       deliveryAddress: profile.delivery_address || '',
       role: profile.role || 'buyer'
     };
@@ -120,7 +120,7 @@ const Auth = {
       };
     }
 
-    const { data, error } = await sb.auth.signInWithPassword({
+    const { error } = await sb.auth.signInWithPassword({
       email,
       password
     });
@@ -132,30 +132,17 @@ const Auth = {
       };
     }
 
-    const userId = data.user.id;
+    const profile = await this.refreshUser();
 
-    const { data: profile, error: profileError } = await sb
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
+    if (!profile) {
+      await sb.auth.signOut();
+      this.clearUser();
 
-    if (profileError || !profile) {
       return {
         ok: false,
-        error: 'Login succeeded, but your profile was not found.'
+        error: 'Login succeeded, but your buyer profile was not found. Please contact admin.'
       };
     }
-
-    this.setUser({
-      id: profile.id,
-      email: profile.email,
-      contactName: profile.contact_name,
-      companyName: profile.company_name,
-      businessType: profile.business_type,
-      deliveryAddress: profile.delivery_address || '',
-      role: profile.role || 'buyer'
-    });
 
     return { ok: true };
   },
@@ -170,7 +157,16 @@ const Auth = {
 
     const { data, error } = await sb.auth.signUp({
       email,
-      password
+      password,
+      options: {
+        emailRedirectTo: window.location.origin + window.location.pathname,
+        data: {
+          contact_name: contactName,
+          company_name: companyName,
+          business_type: businessType,
+          delivery_address: ''
+        }
+      }
     });
 
     if (error) {
@@ -180,43 +176,28 @@ const Auth = {
       };
     }
 
-    if (!data.user) {
+    /*
+      If email confirmation is enabled, Supabase creates the Auth user but may not
+      create an active browser session immediately.
+
+      The database trigger should still create the matching public.profiles row.
+      The user must confirm email, then sign in.
+    */
+    if (!data.session) {
       return {
         ok: false,
-        error: 'Please check your email to confirm your account, then sign in.'
+        error: 'Account created. Please check your email, confirm your account, then sign in.'
       };
     }
 
-    const profilePayload = {
-      id: data.user.id,
-      email,
-      contact_name: contactName,
-      company_name: companyName,
-      business_type: businessType,
-      delivery_address: '',
-      role: 'buyer'
-    };
+    const refreshedProfile = await this.refreshUser();
 
-    const { error: profileError } = await sb
-      .from('profiles')
-      .insert(profilePayload);
-
-    if (profileError) {
+    if (!refreshedProfile) {
       return {
         ok: false,
-        error: profileError.message || 'Account created, but profile creation failed.'
+        error: 'Account created, but profile could not be loaded. Please sign in again.'
       };
     }
-
-    this.setUser({
-      id: data.user.id,
-      email,
-      contactName,
-      companyName,
-      businessType,
-      deliveryAddress: '',
-      role: 'buyer'
-    });
 
     return { ok: true };
   },
@@ -262,15 +243,12 @@ const Auth = {
     }
 
     this.clearUser();
-    localStorage.removeItem('espressgo_admin');
   }
 };
 
 
 /* ============================================================
    Product data
-   Products are still stored in frontend JS for now.
-   Later, you can move this into a Supabase products table.
    ============================================================ */
 
 const Products = [
@@ -289,8 +267,8 @@ const Products = [
     tiers: [
       { min: 1, max: 9, price: 120 },
       { min: 10, max: 29, price: 108 },
-      { min: 30, max: null, price: 96 },
-    ],
+      { min: 30, max: null, price: 96 }
+    ]
   },
   {
     id: 'espressgo-oatmilk',
@@ -307,8 +285,8 @@ const Products = [
     tiers: [
       { min: 1, max: 9, price: 130 },
       { min: 10, max: 29, price: 117 },
-      { min: 30, max: null, price: 104 },
-    ],
+      { min: 30, max: null, price: 104 }
+    ]
   },
   {
     id: 'espressgo-matcha',
@@ -326,8 +304,8 @@ const Products = [
     tiers: [
       { min: 1, max: 9, price: 125 },
       { min: 10, max: 29, price: 112 },
-      { min: 30, max: null, price: 100 },
-    ],
+      { min: 30, max: null, price: 100 }
+    ]
   },
   {
     id: 'espressgo-decaf',
@@ -345,9 +323,9 @@ const Products = [
     tiers: [
       { min: 1, max: 9, price: 115 },
       { min: 10, max: 29, price: 103 },
-      { min: 30, max: null, price: 92 },
-    ],
-  },
+      { min: 30, max: null, price: 92 }
+    ]
+  }
 ];
 
 function getActiveTier(tiers, qty) {
@@ -355,9 +333,9 @@ function getActiveTier(tiers, qty) {
 
   let active = tiers[0];
 
-  for (const t of tiers) {
-    if (qty >= t.min) {
-      active = t;
+  for (const tier of tiers) {
+    if (qty >= tier.min) {
+      active = tier;
     }
   }
 
@@ -497,25 +475,27 @@ function showToast(title, body = '', type = 'success') {
     document.body.appendChild(container);
   }
 
-  const t = document.createElement('div');
-  t.className = `toast ${type} fade-in`;
+  const toast = document.createElement('div');
+  toast.className = `toast ${type} fade-in`;
 
-  t.innerHTML = `
+  toast.innerHTML = `
     <div class="toast-icon">${type === 'success' ? '✓' : '!'}</div>
+
     <div class="toast-body">
       <div class="toast-title">${escapeHTML(title)}</div>
       ${body ? `<div class="toast-sub">${escapeHTML(body)}</div>` : ''}
     </div>
-    <button class="toast-close" aria-label="Close">×</button>
+
+    <button class="toast-close" aria-label="Close" type="button">×</button>
   `;
 
-  t.querySelector('.toast-close').onclick = () => t.remove();
+  toast.querySelector('.toast-close').onclick = () => toast.remove();
 
-  container.appendChild(t);
+  container.appendChild(toast);
 
   setTimeout(() => {
-    if (t && t.parentNode) {
-      t.remove();
+    if (toast && toast.parentNode) {
+      toast.remove();
     }
   }, 4500);
 }
@@ -535,7 +515,7 @@ function buildNav(activePage) {
   const initials = user
     ? (user.contactName || user.companyName || 'U')
         .split(' ')
-        .map(w => w[0])
+        .map(word => word[0])
         .join('')
         .slice(0, 2)
         .toUpperCase()
@@ -571,13 +551,16 @@ function buildNav(activePage) {
   `;
 
   const rightDesktop = loggedIn ? `
-    <a href="admin/admin-login.html" class="nav-admin-btn" style="font-size:12px;">🛡 Admin</a>
+    <a href="admin/admin-login.html" class="nav-admin-btn" style="font-size:12px;">
+      🛡 Admin
+    </a>
 
     <div class="nav-divider"></div>
 
     <div style="position:relative;">
       <button
         id="user-menu-btn"
+        type="button"
         style="display:flex;align-items:center;gap:.6rem;padding:.4rem .6rem;border-radius:10px;background:none;transition:background .15s;"
         onmouseover="this.style.background='rgba(255,255,255,.08)'"
         onmouseout="this.style.background='none'">
@@ -615,6 +598,7 @@ function buildNav(activePage) {
 
         <button
           onclick="handleLogout()"
+          type="button"
           style="width:100%;display:flex;align-items:center;gap:.6rem;padding:.65rem 1rem;font-size:14px;color:#ef4444;background:none;border:none;cursor:pointer;transition:background .15s;"
           onmouseover="this.style.background='#fff5f5'"
           onmouseout="this.style.background='none'">
@@ -654,6 +638,7 @@ function buildNav(activePage) {
 
     <button
       onclick="handleLogout()"
+      type="button"
       class="nav-mobile-link"
       style="background:rgba(239,68,68,.08);color:#ef4444;border:none;cursor:pointer;width:100%;text-align:left;">
       🚪 Sign Out
@@ -668,6 +653,7 @@ function buildNav(activePage) {
 
         <a href="catalog.html" class="nav-logo" aria-label="ESPRESSGO home">
           <div class="nav-logo-icon">E</div>
+
           <div class="nav-logo-text">
             <div class="nav-logo-name">ESPRESSGO</div>
             <div class="nav-logo-sub">Wholesale Portal</div>
@@ -676,12 +662,14 @@ function buildNav(activePage) {
 
         <ul class="nav-links" role="list">
           ${portalLinks}
+
           <li>
             <a href="about.html"
                class="nav-link ${activePage === 'about' ? 'active' : ''}">
                About
             </a>
           </li>
+
           <li>
             <a href="contact.html"
                class="nav-link ${activePage === 'contact' ? 'active' : ''}">
@@ -697,6 +685,7 @@ function buildNav(activePage) {
         <button
           class="nav-hamburger"
           id="hamburger-btn"
+          type="button"
           aria-label="Toggle menu"
           aria-expanded="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -733,28 +722,31 @@ function buildNav(activePage) {
     navPlaceholder.innerHTML = html;
   }
 
-  const ham = document.getElementById('hamburger-btn');
-  const mob = document.getElementById('mobile-menu');
+  const hamburger = document.getElementById('hamburger-btn');
+  const mobileMenu = document.getElementById('mobile-menu');
 
-  if (ham && mob) {
-    ham.addEventListener('click', () => {
-      const open = mob.classList.toggle('open');
-      ham.setAttribute('aria-expanded', open ? 'true' : 'false');
-      mob.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if (hamburger && mobileMenu) {
+    hamburger.addEventListener('click', () => {
+      const open = mobileMenu.classList.toggle('open');
+
+      hamburger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      mobileMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
     });
   }
 
-  const btn = document.getElementById('user-menu-btn');
-  const drop = document.getElementById('user-menu-dropdown');
+  const userMenuBtn = document.getElementById('user-menu-btn');
+  const userMenuDropdown = document.getElementById('user-menu-dropdown');
 
-  if (btn && drop) {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      drop.style.display = drop.style.display === 'block' ? 'none' : 'block';
+  if (userMenuBtn && userMenuDropdown) {
+    userMenuBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+
+      userMenuDropdown.style.display =
+        userMenuDropdown.style.display === 'block' ? 'none' : 'block';
     });
 
     document.addEventListener('click', () => {
-      drop.style.display = 'none';
+      userMenuDropdown.style.display = 'none';
     });
   }
 }
@@ -804,7 +796,11 @@ async function handleLogout() {
 
 function requireAuth() {
   if (!Auth.isLoggedIn()) {
-    localStorage.setItem('redirectAfterLogin', window.location.pathname.split('/').pop() || 'catalog.html');
+    localStorage.setItem(
+      'redirectAfterLogin',
+      window.location.pathname.split('/').pop() || 'catalog.html'
+    );
+
     window.location.href = 'login.html';
   }
 }
@@ -816,11 +812,11 @@ function requireAuth() {
 
 function pouchSVG(product, size = 130, dimmed = false) {
   const { pouchColor, pouchAccent, labelColor, name } = product;
-  const h = size * 1.55;
-  const label = name.replace('ESPRESSGO ', '');
+  const height = size * 1.55;
+  const label = String(name || '').replace('ESPRESSGO ', '');
 
   return `
-    <svg width="${size}" height="${h}" viewBox="0 0 100 155" xmlns="http://www.w3.org/2000/svg" style="opacity:${dimmed ? .4 : 1}">
+    <svg width="${size}" height="${height}" viewBox="0 0 100 155" xmlns="http://www.w3.org/2000/svg" style="opacity:${dimmed ? 0.4 : 1}">
       <rect x="42" y="0" width="16" height="14" rx="4" fill="${pouchAccent}"/>
       <path d="M36 14 Q30 20 28 30 L72 30 Q70 20 64 14 Z" fill="${pouchColor}"/>
       <rect x="18" y="30" width="64" height="100" rx="12" fill="${pouchColor}"/>
@@ -836,10 +832,10 @@ function pouchSVG(product, size = 130, dimmed = false) {
 }
 
 function miniPouchSVG(color, accent, size = 32) {
-  const h = size * 1.5;
+  const height = size * 1.5;
 
   return `
-    <svg width="${size}" height="${h}" viewBox="0 0 36 54" xmlns="http://www.w3.org/2000/svg">
+    <svg width="${size}" height="${height}" viewBox="0 0 36 54" xmlns="http://www.w3.org/2000/svg">
       <rect x="14" y="0" width="8" height="6" rx="2" fill="${accent}"/>
       <path d="M10 6 Q8 9 8 12 L28 12 Q28 9 26 6 Z" fill="${color}"/>
       <rect x="4" y="12" width="28" height="36" rx="6" fill="${color}"/>
@@ -901,7 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </svg>
       </a>
 
-      <button class="social-float-btn faq" id="faq-toggle-btn" aria-label="FAQ Agent">
+      <button class="social-float-btn faq" id="faq-toggle-btn" aria-label="FAQ Agent" type="button">
         <span class="notification-badge" id="faq-badge"></span>
         <svg viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2C6.477 2 2 5.82 2 10.5c0 2.502 1.285 4.747 3.326 6.27-.14 1.155-.71 2.967-1.426 3.824 0 0 2.128-.112 4.417-1.48A12.753 12.753 0 0012 19c5.523 0 10-3.82 10-8.5S17.523 2 12 2zm1 12.5h-2v-2h2v2zm0-3.5h-2V7h2v4z"/>
@@ -914,15 +910,20 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="faq-widget-header">
         <div class="faq-header-info">
           <div class="faq-avatar">☕</div>
+
           <div>
             <div class="faq-status-title">EspressGo Helper</div>
+
             <div class="faq-status-sub">
               <span class="pulse-dot" style="width:7px;height:7px;background:#22c55e;"></span>
               Auto-Reply Agent · Online
             </div>
           </div>
         </div>
-        <button class="faq-close-btn" id="faq-close-btn" aria-label="Close FAQ menu">×</button>
+
+        <button class="faq-close-btn" id="faq-close-btn" aria-label="Close FAQ menu" type="button">
+          ×
+        </button>
       </div>
 
       <div class="faq-chat-body" id="faq-chat-body"></div>
@@ -938,9 +939,9 @@ document.addEventListener('DOMContentLoaded', () => {
           id="faq-user-input"
           class="faq-input"
           placeholder="Or ask a custom question..."
-          aria-label="Type B2B question">
+          aria-label="Type B2B question"/>
 
-        <button class="faq-send-btn" id="faq-send-btn" aria-label="Send message">
+        <button class="faq-send-btn" id="faq-send-btn" aria-label="Send message" type="button">
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
           </svg>
@@ -954,7 +955,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const faqData = [
     {
       q: 'How long does delivery take?',
-      answer: 'Singapore logistics typically take **2 to 3 business days** to arrive at your B2B warehouse. We offer free delivery islandwide for wholesale orders of 5 cartons or more!'
+      answer: 'Singapore logistics typically take **2 to 3 business days** to arrive at your B2B warehouse. We offer free delivery islandwide for wholesale orders of 5 cartons or more.'
     },
     {
       q: 'Does EspressGo contain dairy or sugar?',
@@ -965,7 +966,8 @@ document.addEventListener('DOMContentLoaded', () => {
       answer: 'ESPRESSGO uses Halal-friendly ingredients. For official certificates or procurement documents, please contact Damien directly through WhatsApp.'
     },
     {
-      q: 'Can I track my order?'
+      q: 'Can I track my order?',
+      answer: 'Yes. After signing in, go to your Account page to view your order history and order status. Admin users can update order status from the admin dashboard.'
     }
   ];
 
@@ -984,10 +986,10 @@ document.addEventListener('DOMContentLoaded', () => {
   let moved = false;
   let hasInitialized = false;
 
-  faqButtonsContainer.addEventListener('mousedown', (e) => {
+  faqButtonsContainer.addEventListener('mousedown', (event) => {
     isDown = true;
     moved = false;
-    startX = e.pageX - faqButtonsContainer.offsetLeft;
+    startX = event.pageX - faqButtonsContainer.offsetLeft;
     scrollLeft = faqButtonsContainer.scrollLeft;
   });
 
@@ -999,12 +1001,12 @@ document.addEventListener('DOMContentLoaded', () => {
     isDown = false;
   });
 
-  faqButtonsContainer.addEventListener('mousemove', (e) => {
+  faqButtonsContainer.addEventListener('mousemove', (event) => {
     if (!isDown) return;
 
-    e.preventDefault();
+    event.preventDefault();
 
-    const x = e.pageX - faqButtonsContainer.offsetLeft;
+    const x = event.pageX - faqButtonsContainer.offsetLeft;
     const walk = (x - startX) * 1.5;
 
     if (Math.abs(x - startX) > 5) {
@@ -1014,24 +1016,24 @@ document.addEventListener('DOMContentLoaded', () => {
     faqButtonsContainer.scrollLeft = scrollLeft - walk;
   });
 
-  faqButtonsContainer.addEventListener('click', (e) => {
+  faqButtonsContainer.addEventListener('click', (event) => {
     if (moved) {
-      e.preventDefault();
-      e.stopPropagation();
+      event.preventDefault();
+      event.stopPropagation();
     }
   }, true);
 
   function renderOptions() {
     faqButtonsContainer.innerHTML = faqData.map((item, index) => `
-      <button class="faq-option-btn" data-index="${index}">
+      <button class="faq-option-btn" data-index="${index}" type="button">
         <span>${escapeHTML(item.q)}</span>
       </button>
     `).join('');
 
-    faqButtonsContainer.querySelectorAll('.faq-option-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const idx = btn.getAttribute('data-index');
-        handleQuestionClick(idx);
+    faqButtonsContainer.querySelectorAll('.faq-option-btn').forEach(button => {
+      button.addEventListener('click', () => {
+        const index = button.getAttribute('data-index');
+        handleQuestionClick(index);
       });
     });
   }
@@ -1041,7 +1043,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return escapeHTML(text);
     }
 
-    let formatted = String(text || '');
+    let formatted = escapeHTML(text || '');
 
     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     formatted = formatted.replace(/^\s*-\s+(.*?)$/gm, '• $1');
@@ -1051,15 +1053,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function addMessage(sender, text) {
-    const msg = document.createElement('div');
-    msg.className = `faq-msg ${sender}`;
-    msg.innerHTML = formatResponse(text, sender);
-    faqChatBody.appendChild(msg);
+    const message = document.createElement('div');
+
+    message.className = `faq-msg ${sender}`;
+    message.innerHTML = formatResponse(text, sender);
+
+    faqChatBody.appendChild(message);
     faqChatBody.scrollTop = faqChatBody.scrollHeight;
   }
 
   function showTypingIndicator() {
     const indicator = document.createElement('div');
+
     indicator.className = 'faq-typing';
     indicator.id = 'faq-typing-indicator';
 
@@ -1085,8 +1090,8 @@ document.addEventListener('DOMContentLoaded', () => {
     faqUserInput.disabled = disabled;
     faqSendBtn.disabled = disabled;
 
-    faqButtonsContainer.querySelectorAll('.faq-option-btn').forEach(btn => {
-      btn.disabled = disabled;
+    faqButtonsContainer.querySelectorAll('.faq-option-btn').forEach(button => {
+      button.disabled = disabled;
     });
   }
 
@@ -1142,10 +1147,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
           const rawAnswer =
             data.answer ||
-            'I parsed the coffee matrix, but found an empty response. Try rephrasing!';
+            'I parsed the coffee matrix, but found an empty response. Try rephrasing.';
 
           const orderMatch = rawAnswer.match(/\[\[ORDER_ACTION:\s*([a-zA-Z0-9_-]+),\s*(\d+)\s*\]\]/);
-
           const cleanedAnswer = rawAnswer.replace(/\[\[.*?\]\]/g, '').trim();
 
           addMessage('agent', cleanedAnswer);
@@ -1154,10 +1158,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const productId = orderMatch[1];
             const cartons = parseInt(orderMatch[2], 10);
 
-            console.log(`🤖 AI Order Trigger matched! Adding ${cartons} cartons of ${productId} to cart.`);
-
             const localCart = JSON.parse(localStorage.getItem('espressgo_cart') || '{}');
+
             localCart[productId] = (localCart[productId] || 0) + cartons;
+
             localStorage.setItem('espressgo_cart', JSON.stringify(localCart));
 
             if (typeof window.updateCart === 'function') {
@@ -1171,7 +1175,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   : 'ESPRESSGO Oat Milk';
 
               showToast(
-                'AI Order Drafted!',
+                'AI Order Drafted',
                 `Added ${cartons} cartons of ${productName} to your cart.`,
                 'success'
               );
@@ -1179,23 +1183,13 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         } else {
           console.error('API non-OK response status:', response.status);
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-          if (response.status === 404 && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-            addMessage('agent', "⚠️ **Local Server Route Warning**: It looks like you are running a static local server (like Python's `http.server` or VS Code Live Server). Static servers **cannot** run Node.js backend routes (like `/api/chat.js`), which causes this local 404 error. \n\nTo test the generative AI locally, please run `npx vercel dev` in your command line, or visit the live production site to try it out: **[espresgo-b2-b-portal.vercel.app](https://espresgo-b2-b-portal.vercel.app/catalog)**! 👋");
-          } else {
-            addMessage('agent', "My serverless coffee brain encountered a temporary glitch. Please feel free to request quick custom assistance directly from Damien via WhatsApp!");
-=======
 
           if (
             response.status === 404 &&
-            (window.location.hostname === 'localhost' ||
-             window.location.hostname === '127.0.0.1')
+            (
+              window.location.hostname === 'localhost' ||
+              window.location.hostname === '127.0.0.1'
+            )
           ) {
             addMessage(
               'agent',
@@ -1204,140 +1198,13 @@ document.addEventListener('DOMContentLoaded', () => {
           } else if (response.status === 502) {
             addMessage(
               'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
+              '☕ Our AI assistant is temporarily unavailable. For immediate B2B assistance, please contact Damien through WhatsApp.'
             );
           } else {
-=======
-
-          if (
-            response.status === 404 &&
-            (window.location.hostname === 'localhost' ||
-             window.location.hostname === '127.0.0.1')
-          ) {
             addMessage(
               'agent',
-              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
+              'Something went wrong on our end. Please contact Damien directly on WhatsApp for immediate B2B support.'
             );
-          } else if (response.status === 502) {
-            addMessage(
-              'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
-            );
-          } else {
->>>>>>> Stashed changes
-=======
-
-          if (
-            response.status === 404 &&
-            (window.location.hostname === 'localhost' ||
-             window.location.hostname === '127.0.0.1')
-          ) {
-            addMessage(
-              'agent',
-              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
-            );
-          } else if (response.status === 502) {
-            addMessage(
-              'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
-            );
-          } else {
->>>>>>> Stashed changes
-=======
-
-          if (
-            response.status === 404 &&
-            (window.location.hostname === 'localhost' ||
-             window.location.hostname === '127.0.0.1')
-          ) {
-            addMessage(
-              'agent',
-              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
-            );
-          } else if (response.status === 502) {
-            addMessage(
-              'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
-            );
-          } else {
->>>>>>> Stashed changes
-=======
-
-          if (
-            response.status === 404 &&
-            (window.location.hostname === 'localhost' ||
-             window.location.hostname === '127.0.0.1')
-          ) {
-            addMessage(
-              'agent',
-              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
-            );
-          } else if (response.status === 502) {
-            addMessage(
-              'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
-            );
-          } else {
->>>>>>> Stashed changes
-=======
-
-          if (
-            response.status === 404 &&
-            (window.location.hostname === 'localhost' ||
-             window.location.hostname === '127.0.0.1')
-          ) {
-            addMessage(
-              'agent',
-              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
-            );
-          } else if (response.status === 502) {
-            addMessage(
-              'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
-            );
-          } else {
->>>>>>> Stashed changes
-=======
-
-          if (
-            response.status === 404 &&
-            (window.location.hostname === 'localhost' ||
-             window.location.hostname === '127.0.0.1')
-          ) {
-            addMessage(
-              'agent',
-              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
-            );
-          } else if (response.status === 502) {
-            addMessage(
-              'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
-            );
-          } else {
->>>>>>> Stashed changes
-            addMessage(
-              'agent',
-              "Something went wrong on our end. Please reach out to Damien directly on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a> for immediate B2B support."
-            );
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
           }
         }
       } catch (error) {
@@ -1359,6 +1226,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function handleQuestionClick(index) {
     const item = faqData[index];
+
+    if (!item) return;
+
     handleUserMessage(item.q);
   }
 
@@ -1375,8 +1245,8 @@ document.addEventListener('DOMContentLoaded', () => {
     renderOptions();
   }
 
-  faqToggle.addEventListener('click', (e) => {
-    e.stopPropagation();
+  faqToggle.addEventListener('click', (event) => {
+    event.stopPropagation();
 
     const isOpen = faqWidget.classList.toggle('open');
 
@@ -1393,8 +1263,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  faqClose.addEventListener('click', (e) => {
-    e.stopPropagation();
+  faqClose.addEventListener('click', (event) => {
+    event.stopPropagation();
     faqWidget.classList.remove('open');
   });
 
@@ -1402,14 +1272,14 @@ document.addEventListener('DOMContentLoaded', () => {
     handleUserMessage(faqUserInput.value);
   });
 
-  faqUserInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+  faqUserInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
       handleUserMessage(faqUserInput.value);
     }
   });
 
-  document.addEventListener('click', (e) => {
-    if (!faqWidget.contains(e.target) && !faqToggle.contains(e.target)) {
+  document.addEventListener('click', (event) => {
+    if (!faqWidget.contains(event.target) && !faqToggle.contains(event.target)) {
       faqWidget.classList.remove('open');
     }
   });
