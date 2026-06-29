@@ -1,18 +1,35 @@
 /* ============================================================
    catalog.js — Logic for catalog.html
-   Depends on: shared.js
+
+   ESPRESSGO Supabase Version
+
+   Depends on:
+   - supabase-config.js
+   - shared.js
+
    Uses:
+   - sb / supabaseClient
    - Auth
-   - Products
-   - Orders
+   - Products fallback
    - getActiveTier
    - pouchSVG
    - showToast
    - buildNav
    - buildFooter
-
-   Supabase version
    ============================================================ */
+
+
+/* ============================================================
+   Safety checks
+   ============================================================ */
+
+const db = window.sb || window.supabaseClient;
+
+if (!db) {
+  console.error(
+    "Supabase client not found. Make sure supabase-config.js is loaded before catalog.js."
+  );
+}
 
 
 /* ============================================================
@@ -22,11 +39,61 @@
 let user = null;
 
 // Cart state: maps productId → quantity in cartons
-let cart = JSON.parse(localStorage.getItem('espressgo_cart') || '{}');
+let cart = JSON.parse(localStorage.getItem("espressgo_cart") || "{}");
 
-// Split products into active and coming-soon lists
-const active = Products.filter(p => p.active);
-const comingSoon = Products.filter(p => !p.active);
+// Products loaded from Supabase
+let catalogProducts = [];
+let active = [];
+let comingSoon = [];
+
+
+/* ============================================================
+   Helper fallbacks
+   ============================================================ */
+
+function safeEscape(value) {
+  if (typeof escapeHTML === "function") {
+    return escapeHTML(value || "");
+  }
+
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+
+function safeToast(title, message = "", type = "success") {
+  if (typeof showToast === "function") {
+    showToast(title, message, type);
+  } else {
+    console.log(title, message, type);
+  }
+}
+
+
+function safeGetActiveTier(tiers, qty) {
+  if (typeof getActiveTier === "function") {
+    return getActiveTier(tiers, qty);
+  }
+
+  const sorted = [...(tiers || [])].sort((a, b) => a.min - b.min);
+
+  return (
+    sorted.find(tier => {
+      const minOk = qty >= tier.min;
+      const maxOk = tier.max === null || tier.max === undefined || qty <= tier.max;
+      return minOk && maxOk;
+    }) ||
+    sorted[0] || {
+      min: 1,
+      max: null,
+      price: 0
+    }
+  );
+}
 
 
 /* ============================================================
@@ -34,7 +101,7 @@ const comingSoon = Products.filter(p => !p.active);
    ============================================================ */
 
 function saveCart() {
-  localStorage.setItem('espressgo_cart', JSON.stringify(cart));
+  localStorage.setItem("espressgo_cart", JSON.stringify(cart));
 }
 
 
@@ -45,28 +112,118 @@ function clearCart() {
 
 
 /* ============================================================
+   Supabase product loading
+   ============================================================ */
+
+function normaliseProduct(row, tierRows = []) {
+  return {
+    id: row.id,
+    sku: row.sku || "",
+    name: row.name || "",
+    subtitle: row.subtitle || "",
+    caffeine: row.caffeine || "",
+    format: row.format || "",
+    shelfLife: row.shelf_life || "",
+    pouchColor: row.pouch_color || "#4B2E22",
+    pouchAccent: row.pouch_accent || "#C78A3B",
+    labelColor: row.label_color || "#FFF7ED",
+    active: row.active === true,
+    comingSoonHint: row.coming_soon_hint || "Coming soon",
+
+    tiers: tierRows.length
+      ? tierRows.map(tier => ({
+          min: Number(tier.min_quantity),
+          max: tier.max_quantity === null ? null : Number(tier.max_quantity),
+          price: Number(tier.price)
+        }))
+      : [
+          {
+            min: 1,
+            max: null,
+            price: 0
+          }
+        ]
+  };
+}
+
+
+async function loadProductsFromSupabase() {
+  if (!db) {
+    throw new Error("Supabase client is not available.");
+  }
+
+  const { data: productsData, error: productsError } = await db
+    .from("products")
+    .select("*")
+    .order("created_at", { ascending: true });
+
+  if (productsError) {
+    throw productsError;
+  }
+
+  const { data: tiersData, error: tiersError } = await db
+    .from("product_tiers")
+    .select("*")
+    .order("min_quantity", { ascending: true });
+
+  if (tiersError) {
+    throw tiersError;
+  }
+
+  const tiersByProduct = {};
+
+  (tiersData || []).forEach(tier => {
+    if (!tiersByProduct[tier.product_id]) {
+      tiersByProduct[tier.product_id] = [];
+    }
+
+    tiersByProduct[tier.product_id].push(tier);
+  });
+
+  catalogProducts = (productsData || []).map(product => {
+    return normaliseProduct(product, tiersByProduct[product.id] || []);
+  });
+
+  active = catalogProducts.filter(product => product.active);
+  comingSoon = catalogProducts.filter(product => !product.active);
+
+  console.log("Products loaded from Supabase:", catalogProducts);
+}
+
+
+function loadFallbackProducts() {
+  if (typeof Products === "undefined") {
+    catalogProducts = [];
+    active = [];
+    comingSoon = [];
+    return;
+  }
+
+  catalogProducts = Products;
+  active = Products.filter(product => product.active);
+  comingSoon = Products.filter(product => !product.active);
+
+  console.warn("Using fallback Products from shared.js");
+}
+
+
+/* ============================================================
    Product card renderer
    ============================================================ */
 
-/**
- * Builds the full HTML for one product card.
- * Includes:
- * - product image
- * - price
- * - specs
- * - tier pricing
- * - quantity stepper
- * - subtotal badge
- */
 function renderProductCard(product) {
   const qty = cart[product.id] || 0;
-  const activeTier = getActiveTier(product.tiers, qty);
-  const activeTierIdx = product.tiers.findIndex(t => t.min === activeTier.min);
+  const activeTier = safeGetActiveTier(product.tiers, qty);
+  const activeTierIdx = product.tiers.findIndex(tier => tier.min === activeTier.min);
+
+  const productImage =
+    typeof pouchSVG === "function"
+      ? pouchSVG(product, 130)
+      : `<div style="font-size:3rem;">☕</div>`;
 
   return `
     <div class="product-card" role="listitem">
 
-      <!-- Product image -->
       <div
         class="product-image"
         style="
@@ -76,57 +233,55 @@ function renderProductCard(product) {
             ${product.pouchColor}CC
           );
         ">
-        ${pouchSVG(product, 130)}
+        ${productImage}
       </div>
 
-      <!-- Product content -->
       <div class="product-content">
 
-        <!-- Name -->
         <div class="product-name">
-          ${escapeHTML(product.name)}
+          ${safeEscape(product.name)}
         </div>
 
-        <!-- Price -->
         <div class="product-price">
-          SGD $${product.tiers[0].price}
+          SGD $${Number(product.tiers[0]?.price || 0).toFixed(2)}
           <span>/ carton</span>
         </div>
 
-        <!-- Description -->
         <div class="product-description">
-          ${escapeHTML(product.subtitle)}
+          ${safeEscape(product.subtitle)}
         </div>
 
-        <!-- Specs -->
         <div class="specs">
           ${[
             product.caffeine,
             product.format,
             product.shelfLife
-          ].map(s => `
-            <span class="spec">${escapeHTML(s)}</span>
-          `).join('')}
+          ].filter(Boolean).map(spec => `
+            <span class="spec">${safeEscape(spec)}</span>
+          `).join("")}
         </div>
 
-        <!-- Tier pricing -->
         <div class="tier-section">
           <p class="tier-title">
             Volume Pricing
           </p>
 
           <div class="tier-grid">
-            ${product.tiers.map((tier, i) => {
-              const isActive = i === activeTierIdx && qty > 0;
+            ${product.tiers.map((tier, index) => {
+              const isActive = index === activeTierIdx && qty > 0;
 
-              const pct = i > 0
-                ? Math.round((1 - tier.price / product.tiers[0].price) * 100)
-                : null;
+              const firstPrice = Number(product.tiers[0]?.price || 0);
+              const tierPrice = Number(tier.price || 0);
+
+              const pct =
+                index > 0 && firstPrice > 0
+                  ? Math.round((1 - tierPrice / firstPrice) * 100)
+                  : null;
 
               return `
-                <div class="tier-cell ${isActive ? 'active' : ''}">
+                <div class="tier-cell ${isActive ? "active" : ""}">
                   <div class="tier-price">
-                    SGD $${tier.price}
+                    SGD $${tierPrice.toFixed(2)}
                   </div>
 
                   <div class="tier-range">
@@ -140,15 +295,14 @@ function renderProductCard(product) {
                   ${
                     pct
                       ? `<div class="tier-pct">-${pct}%</div>`
-                      : ''
+                      : ""
                   }
                 </div>
               `;
-            }).join('')}
+            }).join("")}
           </div>
         </div>
 
-        <!-- Cart controls -->
         <div class="product-actions">
 
           <div class="stepper">
@@ -156,8 +310,8 @@ function renderProductCard(product) {
             <button
               class="stepper-btn"
               onclick="updateCart('${product.id}', ${Math.max(0, qty - 1)})"
-              ${qty === 0 ? 'disabled' : ''}
-              aria-label="Decrease ${escapeHTML(product.name)} quantity">
+              ${qty === 0 ? "disabled" : ""}
+              aria-label="Decrease ${safeEscape(product.name)} quantity">
               −
             </button>
 
@@ -165,9 +319,9 @@ function renderProductCard(product) {
               class="stepper-input"
               type="number"
               min="0"
-              value="${qty || ''}"
+              value="${qty || ""}"
               placeholder="0"
-              aria-label="${escapeHTML(product.name)} quantity in cartons"
+              aria-label="${safeEscape(product.name)} quantity in cartons"
               onchange="updateCart(
                 '${product.id}',
                 Math.max(0, parseInt(this.value) || 0)
@@ -177,7 +331,7 @@ function renderProductCard(product) {
             <button
               class="stepper-btn"
               onclick="updateCart('${product.id}', ${qty + 1})"
-              aria-label="Increase ${escapeHTML(product.name)} quantity">
+              aria-label="Increase ${safeEscape(product.name)} quantity">
               +
             </button>
 
@@ -188,7 +342,7 @@ function renderProductCard(product) {
               ? `
                 <div class="subtotal-badge">
                   <div class="subtotal-price">
-                    SGD $${(activeTier.price * qty).toFixed(2)}
+                    SGD $${(Number(activeTier.price || 0) * qty).toFixed(2)}
                   </div>
 
                   <div class="subtotal-pouches">
@@ -196,7 +350,7 @@ function renderProductCard(product) {
                   </div>
                 </div>
               `
-              : ''
+              : ""
           }
 
         </div>
@@ -212,11 +366,25 @@ function renderProductCard(product) {
    ============================================================ */
 
 function renderAll() {
-  const list = document.getElementById('products-list');
+  const list = document.getElementById("products-list");
 
   if (!list) return;
 
-  list.innerHTML = active.map(renderProductCard).join('');
+  if (!active.length) {
+    list.innerHTML = `
+      <div class="card" style="padding:2rem;text-align:center;">
+        <h3 style="color:var(--brown);margin-bottom:.5rem;">
+          No active products found
+        </h3>
+        <p style="color:var(--muted);font-size:.9rem;">
+          Add products in Supabase, then refresh this page.
+        </p>
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML = active.map(renderProductCard).join("");
 }
 
 
@@ -224,10 +392,6 @@ function renderAll() {
    Cart management
    ============================================================ */
 
-/**
- * Updates the cart quantity for a product and refreshes the UI.
- * This function is also used by the AI chat widget in shared.js.
- */
 function updateCart(id, qty) {
   const cleanQty = Math.max(0, parseInt(qty) || 0);
 
@@ -245,53 +409,54 @@ function updateCart(id, qty) {
 window.updateCart = updateCart;
 
 
-/**
- * Total cartons across all products in the cart.
- */
 function totalCartons() {
   return Object.values(cart).reduce((sum, qty) => {
-    return sum + qty;
+    return sum + Number(qty || 0);
   }, 0);
 }
 
 
-/**
- * Total price in SGD, applying the correct tier per product.
- */
 function totalPrice() {
   return Object.entries(cart).reduce((sum, [id, qty]) => {
-    const product = active.find(p => p.id === id);
+    const product = active.find(item => item.id === id);
 
     if (!product) return sum;
 
-    const tier = getActiveTier(product.tiers, qty);
+    const tier = safeGetActiveTier(product.tiers, qty);
 
-    return sum + tier.price * qty;
+    return sum + Number(tier.price || 0) * Number(qty || 0);
   }, 0);
 }
 
 
-/**
- * Shows/hides the sticky checkout bar and updates summary text.
- */
 function updateCheckoutBar() {
   const count = totalCartons();
-  const bar = document.getElementById('checkout-bar');
+  const bar = document.getElementById("checkout-bar");
 
   if (!bar) return;
 
   if (count > 0) {
-    bar.classList.add('visible');
+    bar.classList.add("visible");
 
-    document.getElementById('cart-count-badge').textContent = count;
+    const countBadge = document.getElementById("cart-count-badge");
+    const summaryText = document.getElementById("cart-summary-text");
+    const totalText = document.getElementById("cart-total-text");
 
-    document.getElementById('cart-summary-text').textContent =
-      `${count} carton${count !== 1 ? 's' : ''} · ${(count * 50).toLocaleString()} pouches`;
+    if (countBadge) {
+      countBadge.textContent = count;
+    }
 
-    document.getElementById('cart-total-text').textContent =
-      `SGD $${totalPrice().toFixed(2)} total`;
+    if (summaryText) {
+      summaryText.textContent =
+        `${count} carton${count !== 1 ? "s" : ""} · ${(count * 50).toLocaleString()} pouches`;
+    }
+
+    if (totalText) {
+      totalText.textContent =
+        `SGD $${totalPrice().toFixed(2)} total`;
+    }
   } else {
-    bar.classList.remove('visible');
+    bar.classList.remove("visible");
   }
 }
 
@@ -301,50 +466,57 @@ function updateCheckoutBar() {
    ============================================================ */
 
 function renderComingSoon() {
-  const section = document.getElementById('coming-soon-section');
-  const grid = document.getElementById('coming-grid');
+  const section = document.getElementById("coming-soon-section");
+  const grid = document.getElementById("coming-grid");
 
   if (!section || !grid) return;
 
   if (comingSoon.length <= 0) {
-    section.style.display = 'none';
+    section.style.display = "none";
     return;
   }
 
-  section.style.display = 'block';
+  section.style.display = "block";
 
-  grid.innerHTML = comingSoon.map(p => `
-    <div class="coming-card">
+  grid.innerHTML = comingSoon.map(product => {
+    const image =
+      typeof pouchSVG === "function"
+        ? pouchSVG(product, 72, true)
+        : `<div style="font-size:2rem;">☕</div>`;
 
-      <div
-        class="coming-img"
-        style="
-          background: linear-gradient(
-            145deg,
-            ${p.pouchAccent}BB,
-            ${p.pouchColor}88
-          );
-        ">
+    return `
+      <div class="coming-card">
 
-        ${pouchSVG(p, 72, true)}
+        <div
+          class="coming-img"
+          style="
+            background: linear-gradient(
+              145deg,
+              ${product.pouchAccent}BB,
+              ${product.pouchColor}88
+            );
+          ">
 
-        <div class="coming-soon-badge">
-          🔒 Soon
+          ${image}
+
+          <div class="coming-soon-badge">
+            🔒 Soon
+          </div>
         </div>
-      </div>
 
-      <div class="coming-body">
-        <div class="coming-name">
-          ${escapeHTML(p.name)}
+        <div class="coming-body">
+          <div class="coming-name">
+            ${safeEscape(product.name)}
+          </div>
+
+          <p class="coming-hint">
+            ${safeEscape(product.comingSoonHint || "Coming soon")}
+          </p>
         </div>
 
-        <p class="coming-hint">
-          ${escapeHTML(p.comingSoonHint || 'Coming soon')}
-        </p>
       </div>
-
-    </div>
-  `).join('');
+    `;
+  }).join("");
 }
 
 
@@ -352,102 +524,215 @@ function renderComingSoon() {
    Checkout modal
    ============================================================ */
 
-const modal = document.getElementById('checkout-modal');
+const modal = document.getElementById("checkout-modal");
 
 
-/**
- * Returns the cart as an array of enriched line objects.
- * Used for both the modal and order submission.
- */
 function getOrderLines() {
   return active
-    .filter(p => (cart[p.id] || 0) > 0)
-    .map(p => {
-      const qty = cart[p.id];
-      const tier = getActiveTier(p.tiers, qty);
+    .filter(product => (cart[product.id] || 0) > 0)
+    .map(product => {
+      const qty = Number(cart[product.id] || 0);
+      const tier = safeGetActiveTier(product.tiers, qty);
 
       return {
-        p,
+        p: product,
         qty,
         tier,
-        subtotal: qty * tier.price
+        subtotal: qty * Number(tier.price || 0)
       };
     });
 }
 
 
-/**
- * Opens the checkout modal and populates it with current cart data.
- */
+async function getCurrentSupabaseUser() {
+  if (!db) return null;
+
+  const { data, error } = await db.auth.getUser();
+
+  if (error) {
+    console.warn("No Supabase auth user:", error.message);
+    return null;
+  }
+
+  return data?.user || null;
+}
+
+
+async function getCurrentProfile() {
+  const authUser = await getCurrentSupabaseUser();
+
+  if (!authUser) {
+    if (typeof Auth !== "undefined" && Auth.getUser) {
+      return Auth.getUser();
+    }
+
+    return null;
+  }
+
+  const { data: profile, error } = await db
+    .from("profiles")
+    .select("*")
+    .eq("id", authUser.id)
+    .single();
+
+  if (error) {
+    console.warn("Could not load profile. Falling back to auth user:", error.message);
+
+    return {
+      id: authUser.id,
+      email: authUser.email,
+      contactName: authUser.user_metadata?.contact_name || authUser.email,
+      companyName: authUser.user_metadata?.company_name || "",
+      businessType: authUser.user_metadata?.business_type || "",
+      deliveryAddress: authUser.user_metadata?.delivery_address || "Singapore"
+    };
+  }
+
+  return {
+    id: profile.id,
+    email: profile.email || authUser.email,
+    contactName: profile.contact_name || authUser.email,
+    companyName: profile.company_name || "",
+    businessType: profile.business_type || "",
+    deliveryAddress: profile.delivery_address || "Singapore",
+    role: profile.role || "buyer"
+  };
+}
+
+
 function openModal() {
+  if (!modal) return;
+
   const lines = getOrderLines();
 
   if (!lines.length) {
-    showToast('Cart is empty', 'Please add at least one product before checkout.', 'error');
+    safeToast(
+      "Cart is empty",
+      "Please add at least one product before checkout.",
+      "error"
+    );
     return;
   }
 
-  user = Auth.getUser();
+  const modalItems = document.getElementById("modal-items");
+  const modalTotals = document.getElementById("modal-totals");
+  const deliveryText = document.getElementById("delivery-text");
 
-  document.getElementById('modal-items').innerHTML = lines.map(({ p, qty, tier, subtotal }) => `
-    <div class="modal-item" role="listitem">
+  if (modalItems) {
+    modalItems.innerHTML = lines.map(({ p, qty, tier, subtotal }) => `
+      <div class="modal-item" role="listitem">
 
-      <div
-        class="modal-item-color"
-        style="background:${p.pouchColor};">
-      </div>
-
-      <div>
-        <div class="modal-item-name">
-          ${escapeHTML(p.name)}
+        <div
+          class="modal-item-color"
+          style="background:${p.pouchColor};">
         </div>
 
-        <div class="modal-item-detail">
-          ${qty} ctn × SGD $${tier.price}
+        <div>
+          <div class="modal-item-name">
+            ${safeEscape(p.name)}
+          </div>
+
+          <div class="modal-item-detail">
+            ${qty} ctn × SGD $${Number(tier.price || 0).toFixed(2)}
+          </div>
         </div>
-      </div>
 
-      <div class="modal-item-total">
-        SGD $${subtotal.toFixed(2)}
-      </div>
+        <div class="modal-item-total">
+          SGD $${subtotal.toFixed(2)}
+        </div>
 
-    </div>
-  `).join('');
+      </div>
+    `).join("");
+  }
 
   const tc = totalCartons();
   const tp = totalPrice();
 
-  document.getElementById('modal-totals').innerHTML = `
-    <div class="modal-total-row">
-      <span>Cartons</span>
-      <span>${tc}</span>
-    </div>
+  if (modalTotals) {
+    modalTotals.innerHTML = `
+      <div class="modal-total-row">
+        <span>Cartons</span>
+        <span>${tc}</span>
+      </div>
 
-    <div class="modal-total-row">
-      <span>Pouches</span>
-      <span>${(tc * 50).toLocaleString()}</span>
-    </div>
+      <div class="modal-total-row">
+        <span>Pouches</span>
+        <span>${(tc * 50).toLocaleString()}</span>
+      </div>
 
-    <div class="modal-total-row main">
-      <span>Order total</span>
-      <span style="color:var(--amber);font-size:1.2rem;">
-        SGD $${tp.toFixed(2)}
-      </span>
-    </div>
-  `;
+      <div class="modal-total-row main">
+        <span>Order total</span>
+        <span style="color:var(--amber);font-size:1.2rem;">
+          SGD $${tp.toFixed(2)}
+        </span>
+      </div>
+    `;
+  }
 
-  document.getElementById('delivery-text').textContent =
-    `Delivering to: ${user?.deliveryAddress || 'Your registered address'}`;
+  if (deliveryText) {
+    deliveryText.textContent =
+      `Delivering to: ${user?.deliveryAddress || "Your registered address"}`;
+  }
 
-  modal.classList.add('open');
+  modal.classList.add("open");
 }
 
 
-/**
- * Closes checkout modal.
- */
 function closeModal() {
-  modal.classList.remove('open');
+  if (!modal) return;
+  modal.classList.remove("open");
+}
+
+
+/* ============================================================
+   Supabase order submission
+   ============================================================ */
+
+async function saveOrderToSupabase(currentUser, lines) {
+  if (!db) {
+    throw new Error("Supabase client is not available.");
+  }
+
+  const orderPayload = {
+    profile_id: currentUser.id || null,
+    company: currentUser.companyName || "Unknown Company",
+    contact_name: currentUser.contactName || currentUser.email || "Unknown Contact",
+    business_type: currentUser.businessType || null,
+    delivery_address: currentUser.deliveryAddress || "Singapore",
+    total_cartons: totalCartons(),
+    total_amount: totalPrice(),
+    status: "pending",
+    notes: null
+  };
+
+  const { data: order, error: orderError } = await db
+    .from("orders")
+    .insert(orderPayload)
+    .select()
+    .single();
+
+  if (orderError) {
+    throw orderError;
+  }
+
+  const orderItemsPayload = lines.map(({ p, qty, tier }) => ({
+    order_id: order.id,
+    product_id: p.id,
+    sku: p.sku,
+    name: p.name,
+    cartons: qty,
+    price_per_carton: Number(tier.price || 0)
+  }));
+
+  const { error: itemsError } = await db
+    .from("order_items")
+    .insert(orderItemsPayload);
+
+  if (itemsError) {
+    throw itemsError;
+  }
+
+  return order;
 }
 
 
@@ -455,128 +740,129 @@ function closeModal() {
    Checkout button handlers
    ============================================================ */
 
-document.getElementById('clear-cart-btn').addEventListener('click', () => {
-  clearCart();
-  renderAll();
-  updateCheckoutBar();
-});
+function bindCheckoutButtons() {
+  const clearCartBtn = document.getElementById("clear-cart-btn");
+  const checkoutBtn = document.getElementById("checkout-btn");
+  const modalCloseBtn = document.getElementById("modal-close");
+  const modalBackBtn = document.getElementById("modal-back");
+  const modalPlaceBtn = document.getElementById("modal-place");
 
-
-document.getElementById('checkout-btn').addEventListener('click', async () => {
-  const refreshedUser = await Auth.refreshUser();
-
-  if (!refreshedUser) {
-    localStorage.setItem('redirectAfterLogin', 'catalog.html');
-
-    showToast('Please sign in to continue checkout.');
-
-    setTimeout(() => {
-      window.location.href = 'login.html';
-    }, 600);
-
-    return;
-  }
-
-  user = refreshedUser;
-
-  openModal();
-});
-
-
-document.getElementById('modal-close').addEventListener('click', closeModal);
-document.getElementById('modal-back').addEventListener('click', closeModal);
-
-
-// Close modal when clicking the backdrop
-modal.addEventListener('click', e => {
-  if (e.target === modal) {
-    closeModal();
-  }
-});
-
-
-/* ============================================================
-   Place order
-   ============================================================ */
-
-document.getElementById('modal-place').addEventListener('click', async () => {
-  const placeBtn = document.getElementById('modal-place');
-
-  placeBtn.disabled = true;
-  placeBtn.textContent = 'Submitting…';
-
-  const currentUser = await Auth.refreshUser();
-
-  if (!currentUser) {
-    showToast('Please sign in before placing your order.');
-
-    localStorage.setItem('redirectAfterLogin', 'catalog.html');
-
-    window.location.href = 'login.html';
-    return;
-  }
-
-  const lines = getOrderLines();
-
-  if (!lines.length) {
-    showToast('Cart is empty', 'Please add items before placing an order.', 'error');
-
-    placeBtn.disabled = false;
-    placeBtn.textContent = '✓ Place Order';
-
-    return;
-  }
-
-  try {
-    await Orders.add({
-      company: currentUser.companyName,
-      contactName: currentUser.contactName || currentUser.email,
-      businessType: currentUser.businessType,
-      items: lines.map(({ p, qty, tier }) => ({
-        sku: p.sku,
-        name: p.name,
-        cartons: qty,
-        pricePerCarton: tier.price
-      })),
-      totalCartons: totalCartons(),
-      totalAmount: totalPrice(),
-      status: 'pending',
-      deliveryAddress: currentUser.deliveryAddress || 'Singapore',
+  if (clearCartBtn) {
+    clearCartBtn.addEventListener("click", () => {
+      clearCart();
+      renderAll();
+      updateCheckoutBar();
     });
-  } catch (error) {
-    console.error('Order failed:', error);
-
-    showToast(
-      'Order failed',
-      error.message || 'Could not save order. Please try again.',
-      'error'
-    );
-
-    placeBtn.disabled = false;
-    placeBtn.textContent = '✓ Place Order';
-
-    return;
   }
 
-  closeModal();
+  if (checkoutBtn) {
+    checkoutBtn.addEventListener("click", async () => {
+      user = await getCurrentProfile();
 
-  clearCart();
-  renderAll();
-  updateCheckoutBar();
+      if (!user) {
+        localStorage.setItem("redirectAfterLogin", "catalog.html");
 
-  placeBtn.disabled = false;
-  placeBtn.textContent = '✓ Place Order';
+        safeToast("Please sign in to continue checkout.", "", "error");
 
-  const toast = document.getElementById('order-success');
+        setTimeout(() => {
+          window.location.href = "login.html";
+        }, 600);
 
-  if (toast) {
-    toast.style.display = 'flex';
+        return;
+      }
 
-    setTimeout(() => {
-      toast.style.display = 'none';
-    }, 4000);
+      openModal();
+    });
   }
-});
+
+  if (modalCloseBtn) {
+    modalCloseBtn.addEventListener("click", closeModal);
+  }
+
+  if (modalBackBtn) {
+    modalBackBtn.addEventListener("click", closeModal);
+  }
+
+  if (modal) {
+    modal.addEventListener("click", event => {
+      if (event.target === modal) {
+        closeModal();
+      }
+    });
+  }
+
+  if (modalPlaceBtn) {
+    modalPlaceBtn.addEventListener("click", async () => {
+      const placeBtn = modalPlaceBtn;
+
+      placeBtn.disabled = true;
+      placeBtn.textContent = "Submitting…";
+
+      try {
+        const currentUser = await getCurrentProfile();
+
+        if (!currentUser) {
+          safeToast("Please sign in before placing your order.", "", "error");
+
+          localStorage.setItem("redirectAfterLogin", "catalog.html");
+
+          window.location.href = "login.html";
+          return;
+        }
+
+        const lines = getOrderLines();
+
+        if (!lines.length) {
+          safeToast(
+            "Cart is empty",
+            "Please add items before placing an order.",
+            "error"
+          );
+
+          placeBtn.disabled = false;
+          placeBtn.textContent = "✓ Place Order";
+
+          return;
+        }
+
+        await saveOrderToSupabase(currentUser, lines);
+
+        closeModal();
+
+        clearCart();
+        renderAll();
+        updateCheckoutBar();
+
+        const successToast = document.getElementById("order-success");
+
+        if (successToast) {
+          successToast.style.display = "flex";
+
+          setTimeout(() => {
+            successToast.style.display = "none";
+          }, 4000);
+        } else {
+          safeToast(
+            "Order placed",
+            "Your order has been submitted successfully.",
+            "success"
+          );
+        }
+      } catch (error) {
+        console.error("Order failed:", error);
+
+        safeToast(
+          "Order failed",
+          error.message || "Could not save order. Please try again.",
+          "error"
+        );
+      } finally {
+        placeBtn.disabled = false;
+        placeBtn.textContent = "✓ Place Order";
+      }
+    });
+  }
+}
 
 
 /* ============================================================
@@ -585,18 +871,38 @@ document.getElementById('modal-place').addEventListener('click', async () => {
 
 async function initCatalogPage() {
   try {
-    user = await Auth.refreshUser();
+    user = await getCurrentProfile();
   } catch (error) {
-    console.warn('No active Supabase session found:', error);
-    user = Auth.getUser();
+    console.warn("No active user found:", error.message);
+    user = null;
   }
 
-  buildNav('catalog');
-  buildFooter();
+  if (typeof buildNav === "function") {
+    buildNav("catalog");
+  }
+
+  if (typeof buildFooter === "function") {
+    buildFooter();
+  }
+
+  try {
+    await loadProductsFromSupabase();
+  } catch (error) {
+    console.error("Failed to load products from Supabase:", error.message);
+
+    safeToast(
+      "Could not load Supabase products",
+      "Using local product data for now.",
+      "error"
+    );
+
+    loadFallbackProducts();
+  }
 
   renderAll();
   renderComingSoon();
   updateCheckoutBar();
+  bindCheckoutButtons();
 }
 
 initCatalogPage();

@@ -2,9 +2,19 @@
    supabase-config.js — ESPRESSGO Supabase Client
    ============================================================ */
 
-const SUPABASE_URL = "https://aynwtgkmrymnrhzashtf.supabase.co";
 
-const SUPABASE_KEY = "sb_publishable_stk65gIeVJPmtvdRM4tKDQ_FRIyop5P";
+/* ============================================================
+   Replace these two values with your own Supabase details
+   ============================================================ */
+
+const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co";
+
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+
+/* ============================================================
+   Create Supabase client
+   ============================================================ */
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
@@ -18,5 +28,3 @@ window.sb = sb;
 window.supabaseClient = sb;
 
 console.log("ESPRESSGO Supabase client loaded.");
-console.log("Supabase URL:", SUPABASE_URL);
-console.log("Supabase key starts with:", SUPABASE_KEY.slice(0, 18));

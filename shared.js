@@ -4,8 +4,8 @@
 
    This file manages:
    - Supabase authentication helpers
-   - Shared product data
-   - Supabase order data
+   - Shared fallback product data
+   - Supabase order helpers
    - Navigation rendering
    - Footer rendering
    - Toast notifications
@@ -14,16 +14,29 @@
    - FAQ / AI chat widget
 
    IMPORTANT:
-   This file depends on:
+   HTML pages must load scripts in this order:
    1. Supabase JS CDN
    2. supabase-config.js
-
-   HTML pages must load scripts in this order:
-
-   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-   <script src="supabase-config.js"></script>
-   <script src="shared.js"></script>
+   3. shared.js
    ============================================================ */
+
+
+/* ============================================================
+   Supabase client resolver
+   ============================================================ */
+
+function getSupabaseClient() {
+  if (window.sb) return window.sb;
+  if (window.supabaseClient) return window.supabaseClient;
+
+  try {
+    if (typeof sb !== 'undefined') return sb;
+  } catch (error) {
+    // Ignore missing global lexical variable.
+  }
+
+  return null;
+}
 
 
 /* ============================================================
@@ -50,7 +63,7 @@ const Auth = {
   getUser() {
     try {
       return JSON.parse(localStorage.getItem(this._profileKey) || 'null');
-    } catch {
+    } catch (error) {
       return null;
     }
   },
@@ -69,41 +82,52 @@ const Auth = {
     return !!this.getUser();
   },
 
+  normalizeProfile(profile, authUser = null) {
+    return {
+      id: profile?.id || authUser?.id || null,
+      email: profile?.email || authUser?.email || '',
+      contactName: profile?.contact_name || authUser?.user_metadata?.contact_name || '',
+      companyName: profile?.company_name || authUser?.user_metadata?.company_name || '',
+      businessType: profile?.business_type || authUser?.user_metadata?.business_type || '',
+      deliveryAddress: profile?.delivery_address || authUser?.user_metadata?.delivery_address || '',
+      role: profile?.role || authUser?.user_metadata?.role || 'buyer'
+    };
+  },
+
   async refreshUser() {
-    if (typeof sb === 'undefined') {
-      console.error('Supabase client "sb" is missing. Check supabase-config.js.');
+    const client = getSupabaseClient();
+
+    if (!client) {
+      console.error('Supabase client is missing. Check supabase-config.js.');
       this.clearUser();
       return null;
     }
 
-    const { data: sessionData, error: sessionError } = await sb.auth.getSession();
+    const { data: sessionData, error: sessionError } = await client.auth.getSession();
 
-    if (sessionError || !sessionData.session) {
+    if (sessionError || !sessionData?.session?.user) {
       this.clearUser();
       return null;
     }
 
-    const authUser = sessionData.session.user;
-    const userId = authUser.id;
+    const userId = sessionData.session.user.id;
 
-    const { data: profile, error } = await sb
+    const { data: profile, error: profileError } = await client
       .from('profiles')
       .select('*')
-      .eq('id', userId)
-      .single();
+      .eq('id', authUser.id)
+      .maybeSingle();
 
-    if (error || !profile) {
-      console.error('Failed to load profile:', error);
-      this.clearUser();
-      return null;
+    if (profileError) {
+      console.error('Failed to load profile:', profileError);
     }
 
     const normalizedProfile = {
       id: profile.id,
-      email: profile.email || authUser.email || '',
-      contactName: profile.contact_name || '',
-      companyName: profile.company_name || '',
-      businessType: profile.business_type || '',
+      email: profile.email,
+      contactName: profile.contact_name,
+      companyName: profile.company_name,
+      businessType: profile.business_type,
       deliveryAddress: profile.delivery_address || '',
       role: profile.role || 'buyer'
     };
@@ -113,14 +137,16 @@ const Auth = {
   },
 
   async login(email, password) {
-    if (typeof sb === 'undefined') {
+    const client = getSupabaseClient();
+
+    if (!client) {
       return {
         ok: false,
         error: 'Supabase is not connected. Check supabase-config.js.'
       };
     }
 
-    const { error } = await sb.auth.signInWithPassword({
+    const { data, error } = await sb.auth.signInWithPassword({
       email,
       password
     });
@@ -132,41 +158,47 @@ const Auth = {
       };
     }
 
-    const profile = await this.refreshUser();
+    const userId = data.user.id;
 
-    if (!profile) {
-      await sb.auth.signOut();
-      this.clearUser();
+    const { data: profile, error: profileError } = await sb
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
 
+    if (profileError || !profile) {
       return {
         ok: false,
-        error: 'Login succeeded, but your buyer profile was not found. Please contact admin.'
+        error: 'Login succeeded, but your profile was not found.'
       };
     }
+
+    this.setUser({
+      id: profile.id,
+      email: profile.email,
+      contactName: profile.contact_name,
+      companyName: profile.company_name,
+      businessType: profile.business_type,
+      deliveryAddress: profile.delivery_address || '',
+      role: profile.role || 'buyer'
+    });
 
     return { ok: true };
   },
 
   async register(email, password, companyName, businessType, contactName) {
-    if (typeof sb === 'undefined') {
+    const client = getSupabaseClient();
+
+    if (!client) {
       return {
         ok: false,
         error: 'Supabase is not connected. Check supabase-config.js.'
       };
     }
 
-    const { data, error } = await sb.auth.signUp({
+    const { data, error } = await client.auth.signUp({
       email,
-      password,
-      options: {
-        emailRedirectTo: window.location.origin + window.location.pathname,
-        data: {
-          contact_name: contactName,
-          company_name: companyName,
-          business_type: businessType,
-          delivery_address: ''
-        }
-      }
+      password
     });
 
     if (error) {
@@ -190,7 +222,19 @@ const Auth = {
       };
     }
 
-    const refreshedProfile = await this.refreshUser();
+    const profilePayload = {
+      id: data.user.id,
+      email,
+      contact_name: contactName,
+      company_name: companyName,
+      business_type: businessType,
+      delivery_address: '',
+      role: 'buyer'
+    };
+
+    const { error: profileError } = await sb
+      .from('profiles')
+      .insert(profilePayload);
 
     if (!refreshedProfile) {
       return {
@@ -199,11 +243,32 @@ const Auth = {
       };
     }
 
-    return { ok: true };
+    this.setUser({
+      id: data.user.id,
+      email,
+      contactName,
+      companyName,
+      businessType,
+      deliveryAddress: '',
+      role: 'buyer'
+    });
+
+    return {
+      ok: true,
+      user: normalizedProfile
+    };
   },
 
   async updateProfile(profile) {
+    const client = getSupabaseClient();
     const current = this.getUser();
+
+    if (!client) {
+      return {
+        ok: false,
+        error: 'Supabase is not connected. Check supabase-config.js.'
+      };
+    }
 
     if (!current) {
       return {
@@ -212,13 +277,14 @@ const Auth = {
       };
     }
 
-    const { error } = await sb
+    const { error } = await client
       .from('profiles')
       .update({
         contact_name: profile.contactName,
         company_name: profile.companyName,
         business_type: profile.businessType,
-        delivery_address: profile.deliveryAddress
+        delivery_address: profile.deliveryAddress,
+        updated_at: new Date().toISOString()
       })
       .eq('id', current.id);
 
@@ -229,17 +295,24 @@ const Auth = {
       };
     }
 
-    this.setUser({
+    const updatedProfile = {
       ...current,
       ...profile
-    });
+    };
 
-    return { ok: true };
+    this.setUser(updatedProfile);
+
+    return {
+      ok: true,
+      user: updatedProfile
+    };
   },
 
   async logout() {
-    if (typeof sb !== 'undefined') {
-      await sb.auth.signOut();
+    const client = getSupabaseClient();
+
+    if (client) {
+      await client.auth.signOut();
     }
 
     this.clearUser();
@@ -249,6 +322,8 @@ const Auth = {
 
 /* ============================================================
    Product data
+   Products are still stored in frontend JS for now.
+   Later, you can move this into a Supabase products table.
    ============================================================ */
 
 const Products = [
@@ -329,75 +404,137 @@ const Products = [
 ];
 
 function getActiveTier(tiers, qty) {
-  if (qty <= 0) return tiers[0];
+  const cleanTiers = Array.isArray(tiers) && tiers.length
+    ? tiers
+    : [{ min: 1, max: null, price: 0 }];
 
-  let active = tiers[0];
+  const cleanQty = Number(qty || 0);
 
-  for (const tier of tiers) {
-    if (qty >= tier.min) {
-      active = tier;
+  if (cleanQty <= 0) return cleanTiers[0];
+
+  let activeTier = cleanTiers[0];
+
+  for (const t of tiers) {
+    if (qty >= t.min) {
+      active = t;
     }
   }
 
-  return active;
+  return activeTier;
 }
 
 
 /* ============================================================
    Order data using Supabase
+   Database schema used:
+   - orders.profile_id
+   - orders.created_at
+   - order_items.order_id
    ============================================================ */
 
 const Orders = {
   async getAll() {
-    const { data, error } = await sb
+    const client = getSupabaseClient();
+
+    if (!client) return [];
+
+    let query = client
       .from('orders')
-      .select('*')
-      .order('date_ordered', { ascending: false });
+      .select('*, order_items(*)')
+      .order('created_at', { ascending: false });
+
+    let { data, error } = await query;
+
+    if (error) {
+      console.warn('Nested order_items fetch failed. Retrying orders only:', error.message);
+
+      const fallback = await client
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      data = fallback.data;
+      error = fallback.error;
+    }
 
     if (error) {
       console.error('Failed to load orders:', error);
       return [];
     }
 
-    return data.map(this._fromDb);
+    return (data || []).map(row => this._fromDb(row));
   },
 
   async add(order) {
+    const client = getSupabaseClient();
     const user = Auth.getUser();
+
+    if (!client) {
+      throw new Error('Supabase is not connected. Check supabase-config.js.');
+    }
 
     if (!user) {
       throw new Error('You must be logged in to place an order.');
     }
 
     const payload = {
-      user_id: user.id,
-      company: order.company,
-      contact_name: order.contactName,
-      business_type: order.businessType,
-      items: order.items,
-      total_cartons: order.totalCartons,
-      total_amount: order.totalAmount,
+      profile_id: user.id,
+      company: order.company || user.companyName || 'Unknown Company',
+      contact_name: order.contactName || user.contactName || user.email || 'Unknown Contact',
+      business_type: order.businessType || user.businessType || null,
+      delivery_address: order.deliveryAddress || user.deliveryAddress || 'Singapore',
+      total_cartons: Number(order.totalCartons || 0),
+      total_amount: Number(order.totalAmount || 0),
       status: order.status || 'pending',
-      delivery_address: order.deliveryAddress || '',
       notes: order.notes || null
     };
 
-    const { data, error } = await sb
+    const { data: savedOrder, error: orderError } = await client
       .from('orders')
       .insert(payload)
       .select()
       .single();
 
-    if (error) {
-      console.error('Failed to add order:', error);
-      throw error;
+    if (orderError) {
+      console.error('Failed to add order:', orderError);
+      throw orderError;
     }
 
-    return this._fromDb(data);
+    const items = Array.isArray(order.items) ? order.items : [];
+
+    if (items.length) {
+      const itemPayload = items.map(item => ({
+        order_id: savedOrder.id,
+        product_id: item.productId || item.product_id || item.id || null,
+        sku: item.sku || '',
+        name: item.name || '',
+        cartons: Number(item.cartons || item.qty || 0),
+        price_per_carton: Number(item.pricePerCarton || item.price_per_carton || item.price || 0)
+      }));
+
+      const { error: itemsError } = await client
+        .from('order_items')
+        .insert(itemPayload);
+
+      if (itemsError) {
+        console.error('Order saved, but order items failed:', itemsError);
+        throw itemsError;
+      }
+
+      savedOrder.order_items = itemPayload;
+    }
+
+    return this._fromDb(savedOrder);
   },
 
   async updateStatus(id, status) {
-    const { error } = await sb
+    const client = getSupabaseClient();
+
+    if (!client) {
+      throw new Error('Supabase is not connected. Check supabase-config.js.');
+    }
+
+    const { error } = await client
       .from('orders')
       .update({ status })
       .eq('id', id);
@@ -411,52 +548,86 @@ const Orders = {
   },
 
   async forCurrentUser() {
+    const client = getSupabaseClient();
     const user = Auth.getUser();
 
-    if (!user) return [];
+    if (!client || !user) return [];
 
-    const { data, error } = await sb
+    let { data, error } = await client
       .from('orders')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('date_ordered', { ascending: false });
+      .select('*, order_items(*)')
+      .eq('profile_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('Nested order_items fetch failed. Retrying orders only:', error.message);
+
+      const fallback = await client
+        .from('orders')
+        .select('*')
+        .eq('profile_id', user.id)
+        .order('created_at', { ascending: false });
+
+      data = fallback.data;
+      error = fallback.error;
+    }
 
     if (error) {
       console.error('Failed to load user orders:', error);
       return [];
     }
 
-    return data.map(this._fromDb);
+    return (data || []).map(row => this._fromDb(row));
   },
 
   async forCompany(companyName) {
-    const { data, error } = await sb
+    const client = getSupabaseClient();
+
+    if (!client || !companyName) return [];
+
+    const { data, error } = await client
       .from('orders')
-      .select('*')
+      .select('*, order_items(*)')
       .eq('company', companyName)
-      .order('date_ordered', { ascending: false });
+      .order('created_at', { ascending: false });
 
     if (error) {
       console.error('Failed to load company orders:', error);
       return [];
     }
 
-    return data.map(this._fromDb);
+    return (data || []).map(row => this._fromDb(row));
   },
 
   _fromDb(row) {
+    const nestedItems = Array.isArray(row.order_items) ? row.order_items : [];
+    const legacyItems = Array.isArray(row.items) ? row.items : [];
+
+    const items = nestedItems.length
+      ? nestedItems.map(item => ({
+          id: item.id,
+          productId: item.product_id,
+          sku: item.sku,
+          name: item.name,
+          cartons: Number(item.cartons || 0),
+          pricePerCarton: Number(item.price_per_carton || 0)
+        }))
+      : legacyItems;
+
     return {
       id: String(row.id),
-      company: row.company,
-      contactName: row.contact_name,
-      businessType: row.business_type,
-      items: row.items || [],
+      profileId: row.profile_id || row.user_id || null,
+      company: row.company || '',
+      contactName: row.contact_name || '',
+      businessType: row.business_type || '',
+      items,
       totalCartons: Number(row.total_cartons || 0),
       totalAmount: Number(row.total_amount || 0),
-      status: row.status,
-      deliveryAddress: row.delivery_address,
-      notes: row.notes,
-      dateOrdered: row.date_ordered
+      status: row.status || 'pending',
+      deliveryAddress: row.delivery_address || '',
+      notes: row.notes || '',
+      dateOrdered: row.created_at || row.date_ordered || null,
+      createdAt: row.created_at || null
     };
   }
 };
@@ -489,7 +660,7 @@ function showToast(title, body = '', type = 'success') {
     <button class="toast-close" aria-label="Close" type="button">×</button>
   `;
 
-  toast.querySelector('.toast-close').onclick = () => toast.remove();
+  t.querySelector('.toast-close').onclick = () => t.remove();
 
   container.appendChild(toast);
 
@@ -506,16 +677,19 @@ function showToast(title, body = '', type = 'success') {
    ============================================================ */
 
 function buildNav(activePage) {
-  const user = Auth.getUser();
-  const loggedIn = !!user;
+  const currentUser = Auth.getUser();
+  const loggedIn = !!currentUser;
+  const inAdmin = window.location.pathname.includes('/admin/');
+  const rootPrefix = inAdmin ? '../' : '';
+  const adminPrefix = inAdmin ? '' : 'admin/';
 
-  const safeCompany = escapeHTML(user?.companyName || '');
-  const safeEmail = escapeHTML(user?.email || '');
+  const safeCompany = escapeHTML(currentUser?.companyName || '');
+  const safeEmail = escapeHTML(currentUser?.email || '');
 
-  const initials = user
-    ? (user.contactName || user.companyName || 'U')
+  const initials = currentUser
+    ? (currentUser.contactName || currentUser.companyName || 'U')
         .split(' ')
-        .map(word => word[0])
+        .map(w => w[0])
         .join('')
         .slice(0, 2)
         .toUpperCase()
@@ -523,44 +697,36 @@ function buildNav(activePage) {
 
   const portalLinks = `
     <li>
-      <a href="catalog.html"
-         class="nav-link ${activePage === 'catalog' ? 'active' : ''}">
-         Catalog
+      <a href="${rootPrefix}catalog.html" class="nav-link ${activePage === 'catalog' ? 'active' : ''}">
+        Catalog
       </a>
     </li>
 
     ${loggedIn ? `
       <li>
-        <a href="quick-order.html"
-           class="nav-link ${activePage === 'quick-order' ? 'active' : ''}">
-           Quick Order
+        <a href="${rootPrefix}quick-order.html" class="nav-link ${activePage === 'quick-order' ? 'active' : ''}">
+          Quick Order
         </a>
       </li>
 
       <li>
-        <a href="account.html"
-           class="nav-link ${activePage === 'account' ? 'active' : ''}">
-           Account
+        <a href="${rootPrefix}account.html" class="nav-link ${activePage === 'account' ? 'active' : ''}">
+          Account
         </a>
       </li>
 
-      <li>
-        <div class="nav-divider"></div>
-      </li>
+      <li><div class="nav-divider"></div></li>
     ` : ''}
   `;
 
   const rightDesktop = loggedIn ? `
-    <a href="admin/admin-login.html" class="nav-admin-btn" style="font-size:12px;">
-      🛡 Admin
-    </a>
+    <a href="admin/admin-login.html" class="nav-admin-btn" style="font-size:12px;">🛡 Admin</a>
 
     <div class="nav-divider"></div>
 
     <div style="position:relative;">
       <button
         id="user-menu-btn"
-        type="button"
         style="display:flex;align-items:center;gap:.6rem;padding:.4rem .6rem;border-radius:10px;background:none;transition:background .15s;"
         onmouseover="this.style.background='rgba(255,255,255,.08)'"
         onmouseout="this.style.background='none'">
@@ -587,8 +753,8 @@ function buildNav(activePage) {
         </div>
 
         <a
-          href="account.html"
-          style="display:flex;align-items:center;gap:.6rem;padding:.65rem 1rem;font-size:14px;color:#2C1810;transition:background .15s;"
+          href="${rootPrefix}account.html"
+          style="display:flex;align-items:center;gap:.6rem;padding:.65rem 1rem;font-size:14px;color:#2C1810;text-decoration:none;transition:background .15s;"
           onmouseover="this.style.background='#FAF8F5'"
           onmouseout="this.style.background='none'">
           👤 My Account
@@ -607,24 +773,21 @@ function buildNav(activePage) {
       </div>
     </div>
   ` : `
-    <a href="login.html" class="nav-btn">Sign In</a>
+    <a href="${rootPrefix}login.html" class="nav-btn">Sign In</a>
   `;
 
   const mobilePortalLinks = `
-    <a href="catalog.html"
-       class="nav-mobile-link ${activePage === 'catalog' ? 'active' : ''}">
-       📦 Catalog
+    <a href="${rootPrefix}catalog.html" class="nav-mobile-link ${activePage === 'catalog' ? 'active' : ''}">
+      📦 Catalog
     </a>
 
     ${loggedIn ? `
-      <a href="quick-order.html"
-         class="nav-mobile-link ${activePage === 'quick-order' ? 'active' : ''}">
-         ⚡ Quick Order
+      <a href="${rootPrefix}quick-order.html" class="nav-mobile-link ${activePage === 'quick-order' ? 'active' : ''}">
+        ⚡ Quick Order
       </a>
 
-      <a href="account.html"
-         class="nav-mobile-link ${activePage === 'account' ? 'active' : ''}">
-         👤 Account
+      <a href="${rootPrefix}account.html" class="nav-mobile-link ${activePage === 'account' ? 'active' : ''}">
+        👤 Account
       </a>
 
       <div class="nav-mobile-divider"></div>
@@ -632,7 +795,7 @@ function buildNav(activePage) {
   `;
 
   const mobileAuth = loggedIn ? `
-    <a href="admin/admin-login.html" class="nav-mobile-link">🛡 Admin Portal</a>
+    <a href="${adminPrefix}admin-login.html" class="nav-mobile-link">🛡 Admin Portal</a>
 
     <div class="nav-mobile-divider"></div>
 
@@ -640,18 +803,19 @@ function buildNav(activePage) {
       onclick="handleLogout()"
       type="button"
       class="nav-mobile-link"
+      type="button"
       style="background:rgba(239,68,68,.08);color:#ef4444;border:none;cursor:pointer;width:100%;text-align:left;">
       🚪 Sign Out
     </button>
   ` : `
-    <a href="login.html" class="nav-mobile-signin">Sign In</a>
+    <a href="${rootPrefix}login.html" class="nav-mobile-signin">Sign In</a>
   `;
 
   const html = `
     <nav class="nav" role="navigation" aria-label="Main navigation">
       <div class="nav-inner">
 
-        <a href="catalog.html" class="nav-logo" aria-label="ESPRESSGO home">
+        <a href="${rootPrefix}catalog.html" class="nav-logo" aria-label="ESPRESSGO home">
           <div class="nav-logo-icon">E</div>
 
           <div class="nav-logo-text">
@@ -664,16 +828,14 @@ function buildNav(activePage) {
           ${portalLinks}
 
           <li>
-            <a href="about.html"
-               class="nav-link ${activePage === 'about' ? 'active' : ''}">
-               About
+            <a href="${rootPrefix}about.html" class="nav-link ${activePage === 'about' ? 'active' : ''}">
+              About
             </a>
           </li>
 
           <li>
-            <a href="contact.html"
-               class="nav-link ${activePage === 'contact' ? 'active' : ''}">
-               Contact
+            <a href="${rootPrefix}contact.html" class="nav-link ${activePage === 'contact' ? 'active' : ''}">
+              Contact
             </a>
           </li>
         </ul>
@@ -699,14 +861,12 @@ function buildNav(activePage) {
       <div class="nav-mobile" id="mobile-menu" role="menu" aria-hidden="true">
         ${mobilePortalLinks}
 
-        <a href="about.html"
-           class="nav-mobile-link ${activePage === 'about' ? 'active' : ''}">
-           ℹ️ About
+        <a href="${rootPrefix}about.html" class="nav-mobile-link ${activePage === 'about' ? 'active' : ''}">
+          ℹ️ About
         </a>
 
-        <a href="contact.html"
-           class="nav-mobile-link ${activePage === 'contact' ? 'active' : ''}">
-           ✉️ Contact
+        <a href="${rootPrefix}contact.html" class="nav-mobile-link ${activePage === 'contact' ? 'active' : ''}">
+          ✉️ Contact
         </a>
 
         <div class="nav-mobile-divider"></div>
@@ -722,27 +882,24 @@ function buildNav(activePage) {
     navPlaceholder.innerHTML = html;
   }
 
-  const hamburger = document.getElementById('hamburger-btn');
-  const mobileMenu = document.getElementById('mobile-menu');
+  const ham = document.getElementById('hamburger-btn');
+  const mob = document.getElementById('mobile-menu');
 
-  if (hamburger && mobileMenu) {
-    hamburger.addEventListener('click', () => {
-      const open = mobileMenu.classList.toggle('open');
-
-      hamburger.setAttribute('aria-expanded', open ? 'true' : 'false');
-      mobileMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if (ham && mob) {
+    ham.addEventListener('click', () => {
+      const open = mob.classList.toggle('open');
+      ham.setAttribute('aria-expanded', open ? 'true' : 'false');
+      mob.setAttribute('aria-hidden', open ? 'false' : 'true');
     });
   }
 
   const userMenuBtn = document.getElementById('user-menu-btn');
   const userMenuDropdown = document.getElementById('user-menu-dropdown');
 
-  if (userMenuBtn && userMenuDropdown) {
-    userMenuBtn.addEventListener('click', (event) => {
-      event.stopPropagation();
-
-      userMenuDropdown.style.display =
-        userMenuDropdown.style.display === 'block' ? 'none' : 'block';
+  if (btn && drop) {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      drop.style.display = drop.style.display === 'block' ? 'none' : 'block';
     });
 
     document.addEventListener('click', () => {
@@ -761,6 +918,9 @@ function buildFooter() {
 
   if (!footerPlaceholder) return;
 
+  const inAdmin = window.location.pathname.includes('/admin/');
+  const rootPrefix = inAdmin ? '../' : '';
+
   footerPlaceholder.innerHTML = `
     <footer class="footer" role="contentinfo">
       <div class="footer-inner">
@@ -771,8 +931,8 @@ function buildFooter() {
         </div>
 
         <nav class="footer-links" aria-label="Footer links">
-          <a href="about.html">About</a>
-          <a href="contact.html">Contact</a>
+          <a href="${rootPrefix}about.html">About</a>
+          <a href="${rootPrefix}contact.html">Contact</a>
         </nav>
 
         <p class="footer-copy">
@@ -791,16 +951,14 @@ function buildFooter() {
 
 async function handleLogout() {
   await Auth.logout();
-  window.location.href = 'login.html';
+
+  const inAdmin = window.location.pathname.includes('/admin/');
+  window.location.href = inAdmin ? '../login.html' : 'login.html';
 }
 
 function requireAuth() {
   if (!Auth.isLoggedIn()) {
-    localStorage.setItem(
-      'redirectAfterLogin',
-      window.location.pathname.split('/').pop() || 'catalog.html'
-    );
-
+    localStorage.setItem('redirectAfterLogin', window.location.pathname.split('/').pop() || 'catalog.html');
     window.location.href = 'login.html';
   }
 }
@@ -812,8 +970,8 @@ function requireAuth() {
 
 function pouchSVG(product, size = 130, dimmed = false) {
   const { pouchColor, pouchAccent, labelColor, name } = product;
-  const height = size * 1.55;
-  const label = String(name || '').replace('ESPRESSGO ', '');
+  const h = size * 1.55;
+  const label = name.replace('ESPRESSGO ', '');
 
   return `
     <svg width="${size}" height="${height}" viewBox="0 0 100 155" xmlns="http://www.w3.org/2000/svg" style="opacity:${dimmed ? 0.4 : 1}">
@@ -851,6 +1009,7 @@ function miniPouchSVG(color, accent, size = 32) {
    Make helpers available globally
    ============================================================ */
 
+window.getSupabaseClient = getSupabaseClient;
 window.Auth = Auth;
 window.Products = Products;
 window.Orders = Orders;
@@ -897,7 +1056,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </svg>
       </a>
 
-      <button class="social-float-btn faq" id="faq-toggle-btn" aria-label="FAQ Agent" type="button">
+      <button class="social-float-btn faq" id="faq-toggle-btn" aria-label="FAQ Agent">
         <span class="notification-badge" id="faq-badge"></span>
         <svg viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2C6.477 2 2 5.82 2 10.5c0 2.502 1.285 4.747 3.326 6.27-.14 1.155-.71 2.967-1.426 3.824 0 0 2.128-.112 4.417-1.48A12.753 12.753 0 0012 19c5.523 0 10-3.82 10-8.5S17.523 2 12 2zm1 12.5h-2v-2h2v2zm0-3.5h-2V7h2v4z"/>
@@ -920,10 +1079,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
         </div>
-
-        <button class="faq-close-btn" id="faq-close-btn" aria-label="Close FAQ menu" type="button">
-          ×
-        </button>
+        <button class="faq-close-btn" id="faq-close-btn" aria-label="Close FAQ menu">×</button>
       </div>
 
       <div class="faq-chat-body" id="faq-chat-body"></div>
@@ -941,7 +1097,7 @@ document.addEventListener('DOMContentLoaded', () => {
           placeholder="Or ask a custom question..."
           aria-label="Type B2B question"/>
 
-        <button class="faq-send-btn" id="faq-send-btn" aria-label="Send message" type="button">
+        <button class="faq-send-btn" id="faq-send-btn" aria-label="Send message">
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
           </svg>
@@ -963,11 +1119,10 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     {
       q: 'Is EspressGo halal-certified?',
-      answer: 'ESPRESSGO uses Halal-friendly ingredients. For official certificates or procurement documents, please contact Damien directly through WhatsApp.'
+      answer: 'ESPRESSGO uses Halal-friendly ingredients. For official certificates or procurement documents, please contact us through WhatsApp.'
     },
     {
-      q: 'Can I track my order?',
-      answer: 'Yes. After signing in, go to your Account page to view your order history and order status. Admin users can update order status from the admin dashboard.'
+      q: 'Can I track my order?'
     }
   ];
 
@@ -980,13 +1135,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const faqUserInput = document.getElementById('faq-user-input');
   const faqSendBtn = document.getElementById('faq-send-btn');
 
+  if (!faqWidget || !faqToggle || !faqClose || !faqChatBody || !faqButtonsContainer || !faqUserInput || !faqSendBtn) {
+    return;
+  }
+
   let isDown = false;
   let startX = 0;
   let scrollLeft = 0;
   let moved = false;
   let hasInitialized = false;
 
-  faqButtonsContainer.addEventListener('mousedown', (event) => {
+  faqButtonsContainer.addEventListener('mousedown', (e) => {
     isDown = true;
     moved = false;
     startX = event.pageX - faqButtonsContainer.offsetLeft;
@@ -1001,7 +1160,7 @@ document.addEventListener('DOMContentLoaded', () => {
     isDown = false;
   });
 
-  faqButtonsContainer.addEventListener('mousemove', (event) => {
+  faqButtonsContainer.addEventListener('mousemove', (e) => {
     if (!isDown) return;
 
     event.preventDefault();
@@ -1016,7 +1175,7 @@ document.addEventListener('DOMContentLoaded', () => {
     faqButtonsContainer.scrollLeft = scrollLeft - walk;
   });
 
-  faqButtonsContainer.addEventListener('click', (event) => {
+  faqButtonsContainer.addEventListener('click', (e) => {
     if (moved) {
       event.preventDefault();
       event.stopPropagation();
@@ -1025,15 +1184,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderOptions() {
     faqButtonsContainer.innerHTML = faqData.map((item, index) => `
-      <button class="faq-option-btn" data-index="${index}" type="button">
+      <button class="faq-option-btn" data-index="${index}">
         <span>${escapeHTML(item.q)}</span>
       </button>
     `).join('');
 
-    faqButtonsContainer.querySelectorAll('.faq-option-btn').forEach(button => {
-      button.addEventListener('click', () => {
-        const index = button.getAttribute('data-index');
-        handleQuestionClick(index);
+    faqButtonsContainer.querySelectorAll('.faq-option-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = btn.getAttribute('data-index');
+        handleQuestionClick(idx);
       });
     });
   }
@@ -1053,12 +1212,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function addMessage(sender, text) {
-    const message = document.createElement('div');
-
-    message.className = `faq-msg ${sender}`;
-    message.innerHTML = formatResponse(text, sender);
-
-    faqChatBody.appendChild(message);
+    const msg = document.createElement('div');
+    msg.className = `faq-msg ${sender}`;
+    msg.innerHTML = formatResponse(text, sender);
+    faqChatBody.appendChild(msg);
     faqChatBody.scrollTop = faqChatBody.scrollHeight;
   }
 
@@ -1095,6 +1252,35 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function tryApplyOrderAction(rawAnswer) {
+    const orderMatch = String(rawAnswer || '').match(/\[\[ORDER_ACTION:\s*([a-zA-Z0-9_-]+),\s*(\d+)\s*\]\]/);
+
+    if (!orderMatch) return rawAnswer;
+
+    const productId = orderMatch[1];
+    const cartons = parseInt(orderMatch[2], 10);
+    const cleanedAnswer = String(rawAnswer).replace(/\[\[.*?\]\]/g, '').trim();
+
+    const localCart = JSON.parse(localStorage.getItem('espressgo_cart') || '{}');
+    localCart[productId] = (localCart[productId] || 0) + cartons;
+    localStorage.setItem('espressgo_cart', JSON.stringify(localCart));
+
+    if (typeof window.updateCart === 'function') {
+      window.updateCart(productId, localCart[productId]);
+    }
+
+    const product = Products.find(item => item.id === productId);
+    const productName = product?.name || productId;
+
+    showToast(
+      'AI Order Drafted!',
+      `Added ${cartons} cartons of ${productName} to your cart.`,
+      'success'
+    );
+
+    return cleanedAnswer;
+  }
+
   async function handleUserMessage(text) {
     if (!text || !text.trim()) return;
 
@@ -1106,8 +1292,7 @@ document.addEventListener('DOMContentLoaded', () => {
     addMessage('user', queryText);
 
     const matchedFaq = faqData.find(item =>
-      item.answer &&
-      item.q.toLowerCase().trim() === queryText.toLowerCase().trim()
+      item.answer && item.q.toLowerCase().trim() === queryText.toLowerCase().trim()
     );
 
     if (matchedFaq) {
@@ -1147,9 +1332,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
           const rawAnswer =
             data.answer ||
-            'I parsed the coffee matrix, but found an empty response. Try rephrasing.';
+            'I parsed the coffee matrix, but found an empty response. Try rephrasing!';
 
           const orderMatch = rawAnswer.match(/\[\[ORDER_ACTION:\s*([a-zA-Z0-9_-]+),\s*(\d+)\s*\]\]/);
+
           const cleanedAnswer = rawAnswer.replace(/\[\[.*?\]\]/g, '').trim();
 
           addMessage('agent', cleanedAnswer);
@@ -1158,10 +1344,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const productId = orderMatch[1];
             const cartons = parseInt(orderMatch[2], 10);
 
+            console.log(`🤖 AI Order Trigger matched! Adding ${cartons} cartons of ${productId} to cart.`);
+
             const localCart = JSON.parse(localStorage.getItem('espressgo_cart') || '{}');
-
             localCart[productId] = (localCart[productId] || 0) + cartons;
-
             localStorage.setItem('espressgo_cart', JSON.stringify(localCart));
 
             if (typeof window.updateCart === 'function') {
@@ -1175,7 +1361,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   : 'ESPRESSGO Oat Milk';
 
               showToast(
-                'AI Order Drafted',
+                'AI Order Drafted!',
                 `Added ${cartons} cartons of ${productName} to your cart.`,
                 'success'
               );
@@ -1186,10 +1372,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
           if (
             response.status === 404 &&
-            (
-              window.location.hostname === 'localhost' ||
-              window.location.hostname === '127.0.0.1'
-            )
+            (window.location.hostname === 'localhost' ||
+             window.location.hostname === '127.0.0.1')
+          ) {
+            addMessage(
+              'agent',
+              '⚠️ **Local Server Warning**: WAMP/static localhost cannot run Node.js API routes like `/api/chat`. The website still works, but the AI chat backend needs Vercel dev or deployment.'
+            );
+          } else if (response.status === 502) {
+            addMessage(
+              'agent',
+              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
+            );
+          } else {
+            addMessage(
+              'agent',
+              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
+            );
+          } else if (response.status === 502) {
+            addMessage(
+              'agent',
+              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
+            );
+          } else {
+>>>>>>> Stashed changes
+=======
+
+          if (
+            response.status === 404 &&
+            (window.location.hostname === 'localhost' ||
+             window.location.hostname === '127.0.0.1')
           ) {
             addMessage(
               'agent',
@@ -1198,13 +1410,105 @@ document.addEventListener('DOMContentLoaded', () => {
           } else if (response.status === 502) {
             addMessage(
               'agent',
-              '☕ Our AI assistant is temporarily unavailable. For immediate B2B assistance, please contact Damien through WhatsApp.'
+              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
             );
           } else {
+>>>>>>> Stashed changes
+=======
+
+          if (
+            response.status === 404 &&
+            (window.location.hostname === 'localhost' ||
+             window.location.hostname === '127.0.0.1')
+          ) {
             addMessage(
               'agent',
-              'Something went wrong on our end. Please contact Damien directly on WhatsApp for immediate B2B support.'
+              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
             );
+          } else if (response.status === 502) {
+            addMessage(
+              'agent',
+              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
+            );
+          } else {
+>>>>>>> Stashed changes
+=======
+
+          if (
+            response.status === 404 &&
+            (window.location.hostname === 'localhost' ||
+             window.location.hostname === '127.0.0.1')
+          ) {
+            addMessage(
+              'agent',
+              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
+            );
+          } else if (response.status === 502) {
+            addMessage(
+              'agent',
+              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
+            );
+          } else {
+>>>>>>> Stashed changes
+=======
+
+          if (
+            response.status === 404 &&
+            (window.location.hostname === 'localhost' ||
+             window.location.hostname === '127.0.0.1')
+          ) {
+            addMessage(
+              'agent',
+              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
+            );
+          } else if (response.status === 502) {
+            addMessage(
+              'agent',
+              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
+            );
+          } else {
+>>>>>>> Stashed changes
+=======
+
+          if (
+            response.status === 404 &&
+            (window.location.hostname === 'localhost' ||
+             window.location.hostname === '127.0.0.1')
+          ) {
+            addMessage(
+              'agent',
+              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
+            );
+          } else if (response.status === 502) {
+            addMessage(
+              'agent',
+              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
+            );
+          } else {
+>>>>>>> Stashed changes
+            addMessage(
+              'agent',
+              "Something went wrong on our end. Please reach out to Damien directly on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a> for immediate B2B support."
+            );
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
+=======
+>>>>>>> Stashed changes
           }
         }
       } catch (error) {
@@ -1214,7 +1518,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         addMessage(
           'agent',
-          'I could not contact the AI server. If you are testing locally, make sure you ran `vercel dev` so the `/api` routes are activated.'
+          'I could not contact the AI server. If you are testing locally with WAMP, this is expected because `/api` routes need a Node/Vercel server.'
         );
       } finally {
         setControlsDisabled(false);
@@ -1245,8 +1549,8 @@ document.addEventListener('DOMContentLoaded', () => {
     renderOptions();
   }
 
-  faqToggle.addEventListener('click', (event) => {
-    event.stopPropagation();
+  faqToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
 
     const isOpen = faqWidget.classList.toggle('open');
 
@@ -1263,8 +1567,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  faqClose.addEventListener('click', (event) => {
-    event.stopPropagation();
+  faqClose.addEventListener('click', (e) => {
+    e.stopPropagation();
     faqWidget.classList.remove('open');
   });
 
@@ -1272,14 +1576,14 @@ document.addEventListener('DOMContentLoaded', () => {
     handleUserMessage(faqUserInput.value);
   });
 
-  faqUserInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
+  faqUserInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
       handleUserMessage(faqUserInput.value);
     }
   });
 
-  document.addEventListener('click', (event) => {
-    if (!faqWidget.contains(event.target) && !faqToggle.contains(event.target)) {
+  document.addEventListener('click', (e) => {
+    if (!faqWidget.contains(e.target) && !faqToggle.contains(e.target)) {
       faqWidget.classList.remove('open');
     }
   });
