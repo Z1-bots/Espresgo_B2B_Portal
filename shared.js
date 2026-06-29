@@ -53,6 +53,11 @@ function escapeHTML(value) {
 }
 
 
+function formatCurrency(amount) {
+  return `SGD $${Number(amount || 0).toFixed(2)}`;
+}
+
+
 /* ============================================================
    Auth helpers using Supabase
    ============================================================ */
@@ -69,6 +74,7 @@ const Auth = {
   },
 
   setUser(profile) {
+    if (!profile) return;
     localStorage.setItem(this._profileKey, JSON.stringify(profile));
   },
 
@@ -82,15 +88,17 @@ const Auth = {
     return !!this.getUser();
   },
 
-  normalizeProfile(profile, authUser = null) {
+  normalizeProfile(profile = {}, authUser = null) {
+    const metadata = authUser?.user_metadata || {};
+
     return {
       id: profile?.id || authUser?.id || null,
       email: profile?.email || authUser?.email || '',
-      contactName: profile?.contact_name || authUser?.user_metadata?.contact_name || '',
-      companyName: profile?.company_name || authUser?.user_metadata?.company_name || '',
-      businessType: profile?.business_type || authUser?.user_metadata?.business_type || '',
-      deliveryAddress: profile?.delivery_address || authUser?.user_metadata?.delivery_address || '',
-      role: profile?.role || authUser?.user_metadata?.role || 'buyer'
+      contactName: profile?.contact_name || metadata.contact_name || metadata.contactName || '',
+      companyName: profile?.company_name || metadata.company_name || metadata.companyName || '',
+      businessType: profile?.business_type || metadata.business_type || metadata.businessType || '',
+      deliveryAddress: profile?.delivery_address || metadata.delivery_address || metadata.deliveryAddress || '',
+      role: profile?.role || metadata.role || authUser?.app_metadata?.role || 'buyer'
     };
   },
 
@@ -110,7 +118,7 @@ const Auth = {
       return null;
     }
 
-    const userId = sessionData.session.user.id;
+    const authUser = sessionData.session.user;
 
     const { data: profile, error: profileError } = await client
       .from('profiles')
@@ -120,18 +128,17 @@ const Auth = {
 
     if (profileError) {
       console.error('Failed to load profile:', profileError);
+      this.clearUser();
+      return null;
     }
 
-    const normalizedProfile = {
-      id: profile.id,
-      email: profile.email,
-      contactName: profile.contact_name,
-      companyName: profile.company_name,
-      businessType: profile.business_type,
-      deliveryAddress: profile.delivery_address || '',
-      role: profile.role || 'buyer'
-    };
+    if (!profile) {
+      console.warn('No public.profiles row found for current user:', authUser.id);
+      this.clearUser();
+      return null;
+    }
 
+    const normalizedProfile = this.normalizeProfile(profile, authUser);
     this.setUser(normalizedProfile);
     return normalizedProfile;
   },
@@ -146,7 +153,7 @@ const Auth = {
       };
     }
 
-    const { data, error } = await sb.auth.signInWithPassword({
+    const { error } = await client.auth.signInWithPassword({
       email,
       password
     });
@@ -158,32 +165,19 @@ const Auth = {
       };
     }
 
-    const userId = data.user.id;
+    const profile = await this.refreshUser();
 
-    const { data: profile, error: profileError } = await sb
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-
-    if (profileError || !profile) {
+    if (!profile) {
       return {
         ok: false,
-        error: 'Login succeeded, but your profile was not found.'
+        error: 'Login succeeded, but your buyer profile was not found.'
       };
     }
 
-    this.setUser({
-      id: profile.id,
-      email: profile.email,
-      contactName: profile.contact_name,
-      companyName: profile.company_name,
-      businessType: profile.business_type,
-      deliveryAddress: profile.delivery_address || '',
-      role: profile.role || 'buyer'
-    });
-
-    return { ok: true };
+    return {
+      ok: true,
+      user: profile
+    };
   },
 
   async register(email, password, companyName, businessType, contactName) {
@@ -196,9 +190,20 @@ const Auth = {
       };
     }
 
+    const redirectTo = window.location.origin + window.location.pathname;
+
     const { data, error } = await client.auth.signUp({
       email,
-      password
+      password,
+      options: {
+        emailRedirectTo: redirectTo,
+        data: {
+          contact_name: contactName,
+          company_name: companyName,
+          business_type: businessType,
+          delivery_address: ''
+        }
+      }
     });
 
     if (error) {
@@ -208,54 +213,19 @@ const Auth = {
       };
     }
 
-    /*
-      If email confirmation is enabled, Supabase creates the Auth user but may not
-      create an active browser session immediately.
-
-      The database trigger should still create the matching public.profiles row.
-      The user must confirm email, then sign in.
-    */
     if (!data.session) {
       return {
-        ok: false,
-        error: 'Account created. Please check your email, confirm your account, then sign in.'
+        ok: true,
+        needsEmailConfirmation: true,
+        message: 'Account created. Please check your email, confirm your account, then sign in.'
       };
     }
 
-    const profilePayload = {
-      id: data.user.id,
-      email,
-      contact_name: contactName,
-      company_name: companyName,
-      business_type: businessType,
-      delivery_address: '',
-      role: 'buyer'
-    };
-
-    const { error: profileError } = await sb
-      .from('profiles')
-      .insert(profilePayload);
-
-    if (!refreshedProfile) {
-      return {
-        ok: false,
-        error: 'Account created, but profile could not be loaded. Please sign in again.'
-      };
-    }
-
-    this.setUser({
-      id: data.user.id,
-      email,
-      contactName,
-      companyName,
-      businessType,
-      deliveryAddress: '',
-      role: 'buyer'
-    });
+    const profile = await this.refreshUser();
 
     return {
       ok: true,
-      user: normalizedProfile
+      user: profile
     };
   },
 
@@ -277,15 +247,16 @@ const Auth = {
       };
     }
 
+    const updatePayload = {
+      contact_name: profile.contactName,
+      company_name: profile.companyName,
+      business_type: profile.businessType,
+      delivery_address: profile.deliveryAddress
+    };
+
     const { error } = await client
       .from('profiles')
-      .update({
-        contact_name: profile.contactName,
-        company_name: profile.companyName,
-        business_type: profile.businessType,
-        delivery_address: profile.deliveryAddress,
-        updated_at: new Date().toISOString()
-      })
+      .update(updatePayload)
       .eq('id', current.id);
 
     if (error) {
@@ -322,7 +293,7 @@ const Auth = {
 
 /* ============================================================
    Product data
-   Products are still stored in frontend JS for now.
+   Products are stored in frontend JS for now.
    Later, you can move this into a Supabase products table.
    ============================================================ */
 
@@ -410,13 +381,23 @@ function getActiveTier(tiers, qty) {
 
   const cleanQty = Number(qty || 0);
 
-  if (cleanQty <= 0) return cleanTiers[0];
-
   let activeTier = cleanTiers[0];
 
-  for (const t of tiers) {
-    if (qty >= t.min) {
-      active = t;
+  if (cleanQty <= 0) {
+    return activeTier;
+  }
+
+  for (const tier of cleanTiers) {
+    const min = Number(tier.min || 0);
+    const max = tier.max === null || tier.max === undefined ? Infinity : Number(tier.max);
+
+    if (cleanQty >= min && cleanQty <= max) {
+      activeTier = tier;
+      break;
+    }
+
+    if (cleanQty >= min) {
+      activeTier = tier;
     }
   }
 
@@ -426,10 +407,16 @@ function getActiveTier(tiers, qty) {
 
 /* ============================================================
    Order data using Supabase
-   Database schema used:
+
+   Primary supported schema:
+   - orders.user_id
+   - orders.items jsonb
+   - orders.date_ordered
+
+   Fallback supported schema:
    - orders.profile_id
    - orders.created_at
-   - order_items.order_id
+   - order_items table
    ============================================================ */
 
 const Orders = {
@@ -438,31 +425,8 @@ const Orders = {
 
     if (!client) return [];
 
-    let query = client
-      .from('orders')
-      .select('*, order_items(*)')
-      .order('created_at', { ascending: false });
-
-    let { data, error } = await query;
-
-    if (error) {
-      console.warn('Nested order_items fetch failed. Retrying orders only:', error.message);
-
-      const fallback = await client
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      data = fallback.data;
-      error = fallback.error;
-    }
-
-    if (error) {
-      console.error('Failed to load orders:', error);
-      return [];
-    }
-
-    return (data || []).map(row => this._fromDb(row));
+    const result = await this._selectOrders(client, null);
+    return result.map(row => this._fromDb(row));
   },
 
   async add(order) {
@@ -477,30 +441,57 @@ const Orders = {
       throw new Error('You must be logged in to place an order.');
     }
 
-    const payload = {
-      profile_id: user.id,
+    const items = Array.isArray(order.items) ? order.items : [];
+
+    const primaryPayload = {
+      user_id: user.id,
       company: order.company || user.companyName || 'Unknown Company',
       contact_name: order.contactName || user.contactName || user.email || 'Unknown Contact',
       business_type: order.businessType || user.businessType || null,
-      delivery_address: order.deliveryAddress || user.deliveryAddress || 'Singapore',
+      items,
       total_cartons: Number(order.totalCartons || 0),
       total_amount: Number(order.totalAmount || 0),
       status: order.status || 'pending',
+      delivery_address: order.deliveryAddress || user.deliveryAddress || 'Singapore',
       notes: order.notes || null
     };
 
-    const { data: savedOrder, error: orderError } = await client
+    let { data: savedOrder, error: orderError } = await client
       .from('orders')
-      .insert(payload)
+      .insert(primaryPayload)
       .select()
       .single();
 
-    if (orderError) {
-      console.error('Failed to add order:', orderError);
-      throw orderError;
+    if (!orderError && savedOrder) {
+      return this._fromDb(savedOrder);
     }
 
-    const items = Array.isArray(order.items) ? order.items : [];
+    console.warn('Primary orders insert failed. Trying fallback schema:', orderError?.message || orderError);
+
+    const fallbackPayload = {
+      profile_id: user.id,
+      company: primaryPayload.company,
+      contact_name: primaryPayload.contact_name,
+      business_type: primaryPayload.business_type,
+      delivery_address: primaryPayload.delivery_address,
+      total_cartons: primaryPayload.total_cartons,
+      total_amount: primaryPayload.total_amount,
+      status: primaryPayload.status,
+      notes: primaryPayload.notes
+    };
+
+    const fallback = await client
+      .from('orders')
+      .insert(fallbackPayload)
+      .select()
+      .single();
+
+    if (fallback.error) {
+      console.error('Failed to add order:', fallback.error);
+      throw fallback.error;
+    }
+
+    savedOrder = fallback.data;
 
     if (items.length) {
       const itemPayload = items.map(item => ({
@@ -517,11 +508,10 @@ const Orders = {
         .insert(itemPayload);
 
       if (itemsError) {
-        console.error('Order saved, but order items failed:', itemsError);
-        throw itemsError;
+        console.warn('Order saved, but fallback order_items insert failed:', itemsError.message);
+      } else {
+        savedOrder.order_items = itemPayload;
       }
-
-      savedOrder.order_items = itemPayload;
     }
 
     return this._fromDb(savedOrder);
@@ -553,31 +543,8 @@ const Orders = {
 
     if (!client || !user) return [];
 
-    let { data, error } = await client
-      .from('orders')
-      .select('*, order_items(*)')
-      .eq('profile_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.warn('Nested order_items fetch failed. Retrying orders only:', error.message);
-
-      const fallback = await client
-        .from('orders')
-        .select('*')
-        .eq('profile_id', user.id)
-        .order('created_at', { ascending: false });
-
-      data = fallback.data;
-      error = fallback.error;
-    }
-
-    if (error) {
-      console.error('Failed to load user orders:', error);
-      return [];
-    }
-
-    return (data || []).map(row => this._fromDb(row));
+    const result = await this._selectOrders(client, user.id);
+    return result.map(row => this._fromDb(row));
   },
 
   async forCompany(companyName) {
@@ -587,9 +554,8 @@ const Orders = {
 
     const { data, error } = await client
       .from('orders')
-      .select('*, order_items(*)')
-      .eq('company', companyName)
-      .order('created_at', { ascending: false });
+      .select('*')
+      .eq('company', companyName);
 
     if (error) {
       console.error('Failed to load company orders:', error);
@@ -597,6 +563,49 @@ const Orders = {
     }
 
     return (data || []).map(row => this._fromDb(row));
+  },
+
+  async _selectOrders(client, userId = null) {
+    async function tryQuery(columnName, orderColumn) {
+      let query = client.from('orders').select('*');
+
+      if (userId && columnName) {
+        query = query.eq(columnName, userId);
+      }
+
+      if (orderColumn) {
+        query = query.order(orderColumn, { ascending: false });
+      }
+
+      return query;
+    }
+
+    const attempts = [];
+
+    if (userId) {
+      attempts.push(() => tryQuery('user_id', 'date_ordered'));
+      attempts.push(() => tryQuery('user_id', 'created_at'));
+      attempts.push(() => tryQuery('profile_id', 'created_at'));
+      attempts.push(() => tryQuery('profile_id', 'date_ordered'));
+      attempts.push(() => tryQuery('user_id', null));
+      attempts.push(() => tryQuery('profile_id', null));
+    } else {
+      attempts.push(() => tryQuery(null, 'date_ordered'));
+      attempts.push(() => tryQuery(null, 'created_at'));
+      attempts.push(() => tryQuery(null, null));
+    }
+
+    for (const attempt of attempts) {
+      const { data, error } = await attempt();
+
+      if (!error) {
+        return data || [];
+      }
+
+      console.warn('Order select attempt failed:', error.message);
+    }
+
+    return [];
   },
 
   _fromDb(row) {
@@ -616,6 +625,7 @@ const Orders = {
 
     return {
       id: String(row.id),
+      userId: row.user_id || row.profile_id || null,
       profileId: row.profile_id || row.user_id || null,
       company: row.company || '',
       contactName: row.contact_name || '',
@@ -626,8 +636,8 @@ const Orders = {
       status: row.status || 'pending',
       deliveryAddress: row.delivery_address || '',
       notes: row.notes || '',
-      dateOrdered: row.created_at || row.date_ordered || null,
-      createdAt: row.created_at || null
+      dateOrdered: row.date_ordered || row.created_at || null,
+      createdAt: row.created_at || row.date_ordered || null
     };
   }
 };
@@ -660,7 +670,11 @@ function showToast(title, body = '', type = 'success') {
     <button class="toast-close" aria-label="Close" type="button">×</button>
   `;
 
-  t.querySelector('.toast-close').onclick = () => t.remove();
+  const closeBtn = toast.querySelector('.toast-close');
+
+  if (closeBtn) {
+    closeBtn.onclick = () => toast.remove();
+  }
 
   container.appendChild(toast);
 
@@ -689,7 +703,8 @@ function buildNav(activePage) {
   const initials = currentUser
     ? (currentUser.contactName || currentUser.companyName || 'U')
         .split(' ')
-        .map(w => w[0])
+        .filter(Boolean)
+        .map(word => word[0])
         .join('')
         .slice(0, 2)
         .toUpperCase()
@@ -720,14 +735,15 @@ function buildNav(activePage) {
   `;
 
   const rightDesktop = loggedIn ? `
-    <a href="admin/admin-login.html" class="nav-admin-btn" style="font-size:12px;">🛡 Admin</a>
+    <a href="${adminPrefix}admin-login.html" class="nav-admin-btn" style="font-size:12px;">🛡 Admin</a>
 
     <div class="nav-divider"></div>
 
     <div style="position:relative;">
       <button
         id="user-menu-btn"
-        style="display:flex;align-items:center;gap:.6rem;padding:.4rem .6rem;border-radius:10px;background:none;transition:background .15s;"
+        type="button"
+        style="display:flex;align-items:center;gap:.6rem;padding:.4rem .6rem;border-radius:10px;background:none;border:none;cursor:pointer;transition:background .15s;"
         onmouseover="this.style.background='rgba(255,255,255,.08)'"
         onmouseout="this.style.background='none'">
 
@@ -760,6 +776,14 @@ function buildNav(activePage) {
           👤 My Account
         </a>
 
+        <a
+          href="${rootPrefix}mfa-setup.html"
+          style="display:flex;align-items:center;gap:.6rem;padding:.65rem 1rem;font-size:14px;color:#2C1810;text-decoration:none;transition:background .15s;"
+          onmouseover="this.style.background='#FAF8F5'"
+          onmouseout="this.style.background='none'">
+          🔐 MFA Setup
+        </a>
+
         <div style="height:1px;background:#F0EAE4;"></div>
 
         <button
@@ -790,6 +814,10 @@ function buildNav(activePage) {
         👤 Account
       </a>
 
+      <a href="${rootPrefix}mfa-setup.html" class="nav-mobile-link ${activePage === 'mfa' ? 'active' : ''}">
+        🔐 MFA Setup
+      </a>
+
       <div class="nav-mobile-divider"></div>
     ` : ''}
   `;
@@ -803,7 +831,6 @@ function buildNav(activePage) {
       onclick="handleLogout()"
       type="button"
       class="nav-mobile-link"
-      type="button"
       style="background:rgba(239,68,68,.08);color:#ef4444;border:none;cursor:pointer;width:100%;text-align:left;">
       🚪 Sign Out
     </button>
@@ -896,10 +923,14 @@ function buildNav(activePage) {
   const userMenuBtn = document.getElementById('user-menu-btn');
   const userMenuDropdown = document.getElementById('user-menu-dropdown');
 
-  if (btn && drop) {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      drop.style.display = drop.style.display === 'block' ? 'none' : 'block';
+  if (userMenuBtn && userMenuDropdown) {
+    userMenuBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      userMenuDropdown.style.display = userMenuDropdown.style.display === 'block' ? 'none' : 'block';
+    });
+
+    userMenuDropdown.addEventListener('click', (event) => {
+      event.stopPropagation();
     });
 
     document.addEventListener('click', () => {
@@ -958,7 +989,11 @@ async function handleLogout() {
 
 function requireAuth() {
   if (!Auth.isLoggedIn()) {
-    localStorage.setItem('redirectAfterLogin', window.location.pathname.split('/').pop() || 'catalog.html');
+    localStorage.setItem(
+      'redirectAfterLogin',
+      window.location.pathname.split('/').pop() || 'catalog.html'
+    );
+
     window.location.href = 'login.html';
   }
 }
@@ -969,22 +1004,28 @@ function requireAuth() {
    ============================================================ */
 
 function pouchSVG(product, size = 130, dimmed = false) {
-  const { pouchColor, pouchAccent, labelColor, name } = product;
-  const h = size * 1.55;
-  const label = name.replace('ESPRESSGO ', '');
+  const {
+    pouchColor = '#C8580A',
+    pouchAccent = '#8B3A00',
+    labelColor = '#F5E0C8',
+    name = 'ESPRESSGO'
+  } = product || {};
+
+  const height = size * 1.55;
+  const label = String(name).replace('ESPRESSGO ', '');
 
   return `
     <svg width="${size}" height="${height}" viewBox="0 0 100 155" xmlns="http://www.w3.org/2000/svg" style="opacity:${dimmed ? 0.4 : 1}">
-      <rect x="42" y="0" width="16" height="14" rx="4" fill="${pouchAccent}"/>
-      <path d="M36 14 Q30 20 28 30 L72 30 Q70 20 64 14 Z" fill="${pouchColor}"/>
-      <rect x="18" y="30" width="64" height="100" rx="12" fill="${pouchColor}"/>
-      <rect x="18" y="122" width="64" height="8" rx="6" fill="${pouchAccent}"/>
-      <rect x="22" y="42" width="56" height="72" rx="6" fill="${labelColor}" opacity="0.92"/>
-      <text x="50" y="62" text-anchor="middle" font-size="8.5" font-weight="700" font-family="sans-serif" fill="${pouchAccent}" letter-spacing="0.5">ESPRESSGO</text>
-      <line x1="26" y1="66" x2="74" y2="66" stroke="${pouchColor}" stroke-width="0.8" opacity="0.4"/>
-      <circle cx="50" cy="68" r="7" fill="${pouchColor}" opacity="0.8"/>
-      <path d="M44 75 Q48 84 50 88 Q52 84 56 75 Z" fill="${pouchColor}" opacity="0.7"/>
-      <text x="50" y="109" text-anchor="middle" font-size="4.2" font-family="sans-serif" fill="${pouchAccent}" opacity="0.7">${escapeHTML(label)}</text>
+      <rect x="42" y="0" width="16" height="14" rx="4" fill="${escapeHTML(pouchAccent)}"/>
+      <path d="M36 14 Q30 20 28 30 L72 30 Q70 20 64 14 Z" fill="${escapeHTML(pouchColor)}"/>
+      <rect x="18" y="30" width="64" height="100" rx="12" fill="${escapeHTML(pouchColor)}"/>
+      <rect x="18" y="122" width="64" height="8" rx="6" fill="${escapeHTML(pouchAccent)}"/>
+      <rect x="22" y="42" width="56" height="72" rx="6" fill="${escapeHTML(labelColor)}" opacity="0.92"/>
+      <text x="50" y="62" text-anchor="middle" font-size="8.5" font-weight="700" font-family="sans-serif" fill="${escapeHTML(pouchAccent)}" letter-spacing="0.5">ESPRESSGO</text>
+      <line x1="26" y1="66" x2="74" y2="66" stroke="${escapeHTML(pouchColor)}" stroke-width="0.8" opacity="0.4"/>
+      <circle cx="50" cy="78" r="8" fill="${escapeHTML(pouchColor)}" opacity="0.8"/>
+      <path d="M44 86 Q48 96 50 101 Q52 96 56 86 Z" fill="${escapeHTML(pouchColor)}" opacity="0.7"/>
+      <text x="50" y="111" text-anchor="middle" font-size="4.5" font-family="sans-serif" fill="${escapeHTML(pouchAccent)}" opacity="0.75">${escapeHTML(label)}</text>
     </svg>
   `;
 }
@@ -994,12 +1035,12 @@ function miniPouchSVG(color, accent, size = 32) {
 
   return `
     <svg width="${size}" height="${height}" viewBox="0 0 36 54" xmlns="http://www.w3.org/2000/svg">
-      <rect x="14" y="0" width="8" height="6" rx="2" fill="${accent}"/>
-      <path d="M10 6 Q8 9 8 12 L28 12 Q28 9 26 6 Z" fill="${color}"/>
-      <rect x="4" y="12" width="28" height="36" rx="6" fill="${color}"/>
-      <rect x="4" y="44" width="28" height="4" rx="3" fill="${accent}"/>
-      <rect x="7" y="16" width="22" height="26" rx="4" fill="${accent}" opacity="0.18"/>
-      <text x="18" y="28" text-anchor="middle" font-size="4" font-weight="700" font-family="sans-serif" fill="${accent}" letter-spacing="0.2">ESG</text>
+      <rect x="14" y="0" width="8" height="6" rx="2" fill="${escapeHTML(accent)}"/>
+      <path d="M10 6 Q8 9 8 12 L28 12 Q28 9 26 6 Z" fill="${escapeHTML(color)}"/>
+      <rect x="4" y="12" width="28" height="36" rx="6" fill="${escapeHTML(color)}"/>
+      <rect x="4" y="44" width="28" height="4" rx="3" fill="${escapeHTML(accent)}"/>
+      <rect x="7" y="16" width="22" height="26" rx="4" fill="${escapeHTML(accent)}" opacity="0.18"/>
+      <text x="18" y="28" text-anchor="middle" font-size="4" font-weight="700" font-family="sans-serif" fill="${escapeHTML(accent)}" letter-spacing="0.2">ESG</text>
     </svg>
   `;
 }
@@ -1014,6 +1055,7 @@ window.Auth = Auth;
 window.Products = Products;
 window.Orders = Orders;
 window.getActiveTier = getActiveTier;
+window.formatCurrency = formatCurrency;
 window.showToast = showToast;
 window.buildNav = buildNav;
 window.buildFooter = buildFooter;
@@ -1056,7 +1098,7 @@ document.addEventListener('DOMContentLoaded', () => {
         </svg>
       </a>
 
-      <button class="social-float-btn faq" id="faq-toggle-btn" aria-label="FAQ Agent">
+      <button class="social-float-btn faq" id="faq-toggle-btn" type="button" aria-label="FAQ Agent">
         <span class="notification-badge" id="faq-badge"></span>
         <svg viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2C6.477 2 2 5.82 2 10.5c0 2.502 1.285 4.747 3.326 6.27-.14 1.155-.71 2.967-1.426 3.824 0 0 2.128-.112 4.417-1.48A12.753 12.753 0 0012 19c5.523 0 10-3.82 10-8.5S17.523 2 12 2zm1 12.5h-2v-2h2v2zm0-3.5h-2V7h2v4z"/>
@@ -1079,7 +1121,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
           </div>
         </div>
-        <button class="faq-close-btn" id="faq-close-btn" aria-label="Close FAQ menu">×</button>
+        <button class="faq-close-btn" id="faq-close-btn" type="button" aria-label="Close FAQ menu">×</button>
       </div>
 
       <div class="faq-chat-body" id="faq-chat-body"></div>
@@ -1097,7 +1139,7 @@ document.addEventListener('DOMContentLoaded', () => {
           placeholder="Or ask a custom question..."
           aria-label="Type B2B question"/>
 
-        <button class="faq-send-btn" id="faq-send-btn" aria-label="Send message">
+        <button class="faq-send-btn" id="faq-send-btn" type="button" aria-label="Send message">
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
           </svg>
@@ -1122,7 +1164,12 @@ document.addEventListener('DOMContentLoaded', () => {
       answer: 'ESPRESSGO uses Halal-friendly ingredients. For official certificates or procurement documents, please contact us through WhatsApp.'
     },
     {
-      q: 'Can I track my order?'
+      q: 'Can I track my order?',
+      answer: 'Yes. After signing in, go to **Account** to view your submitted orders and status updates such as pending, processing, shipped, or delivered.'
+    },
+    {
+      q: 'What is the minimum wholesale order?',
+      answer: 'The catalog supports carton-based ordering. 1 carton contains 50 pouches. Volume pricing improves when you order more cartons.'
     }
   ];
 
@@ -1145,7 +1192,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let moved = false;
   let hasInitialized = false;
 
-  faqButtonsContainer.addEventListener('mousedown', (e) => {
+  faqButtonsContainer.addEventListener('mousedown', (event) => {
     isDown = true;
     moved = false;
     startX = event.pageX - faqButtonsContainer.offsetLeft;
@@ -1160,7 +1207,7 @@ document.addEventListener('DOMContentLoaded', () => {
     isDown = false;
   });
 
-  faqButtonsContainer.addEventListener('mousemove', (e) => {
+  faqButtonsContainer.addEventListener('mousemove', (event) => {
     if (!isDown) return;
 
     event.preventDefault();
@@ -1175,7 +1222,7 @@ document.addEventListener('DOMContentLoaded', () => {
     faqButtonsContainer.scrollLeft = scrollLeft - walk;
   });
 
-  faqButtonsContainer.addEventListener('click', (e) => {
+  faqButtonsContainer.addEventListener('click', (event) => {
     if (moved) {
       event.preventDefault();
       event.stopPropagation();
@@ -1184,14 +1231,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderOptions() {
     faqButtonsContainer.innerHTML = faqData.map((item, index) => `
-      <button class="faq-option-btn" data-index="${index}">
+      <button class="faq-option-btn" type="button" data-index="${index}">
         <span>${escapeHTML(item.q)}</span>
       </button>
     `).join('');
 
-    faqButtonsContainer.querySelectorAll('.faq-option-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const idx = btn.getAttribute('data-index');
+    faqButtonsContainer.querySelectorAll('.faq-option-btn').forEach(button => {
+      button.addEventListener('click', () => {
+        const idx = button.getAttribute('data-index');
         handleQuestionClick(idx);
       });
     });
@@ -1255,7 +1302,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function tryApplyOrderAction(rawAnswer) {
     const orderMatch = String(rawAnswer || '').match(/\[\[ORDER_ACTION:\s*([a-zA-Z0-9_-]+),\s*(\d+)\s*\]\]/);
 
-    if (!orderMatch) return rawAnswer;
+    if (!orderMatch) return String(rawAnswer || '');
 
     const productId = orderMatch[1];
     const cartons = parseInt(orderMatch[2], 10);
@@ -1334,39 +1381,8 @@ document.addEventListener('DOMContentLoaded', () => {
             data.answer ||
             'I parsed the coffee matrix, but found an empty response. Try rephrasing!';
 
-          const orderMatch = rawAnswer.match(/\[\[ORDER_ACTION:\s*([a-zA-Z0-9_-]+),\s*(\d+)\s*\]\]/);
-
-          const cleanedAnswer = rawAnswer.replace(/\[\[.*?\]\]/g, '').trim();
-
+          const cleanedAnswer = tryApplyOrderAction(rawAnswer);
           addMessage('agent', cleanedAnswer);
-
-          if (orderMatch) {
-            const productId = orderMatch[1];
-            const cartons = parseInt(orderMatch[2], 10);
-
-            console.log(`🤖 AI Order Trigger matched! Adding ${cartons} cartons of ${productId} to cart.`);
-
-            const localCart = JSON.parse(localStorage.getItem('espressgo_cart') || '{}');
-            localCart[productId] = (localCart[productId] || 0) + cartons;
-            localStorage.setItem('espressgo_cart', JSON.stringify(localCart));
-
-            if (typeof window.updateCart === 'function') {
-              window.updateCart(productId, localCart[productId]);
-            }
-
-            if (typeof showToast === 'function') {
-              const productName =
-                productId === 'espressgo-original'
-                  ? 'ESPRESSGO Original'
-                  : 'ESPRESSGO Oat Milk';
-
-              showToast(
-                'AI Order Drafted!',
-                `Added ${cartons} cartons of ${productName} to your cart.`,
-                'success'
-              );
-            }
-          }
         } else {
           console.error('API non-OK response status:', response.status);
 
@@ -1387,128 +1403,8 @@ document.addEventListener('DOMContentLoaded', () => {
           } else {
             addMessage(
               'agent',
-              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
-            );
-          } else if (response.status === 502) {
-            addMessage(
-              'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
-            );
-          } else {
->>>>>>> Stashed changes
-=======
-
-          if (
-            response.status === 404 &&
-            (window.location.hostname === 'localhost' ||
-             window.location.hostname === '127.0.0.1')
-          ) {
-            addMessage(
-              'agent',
-              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
-            );
-          } else if (response.status === 502) {
-            addMessage(
-              'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
-            );
-          } else {
->>>>>>> Stashed changes
-=======
-
-          if (
-            response.status === 404 &&
-            (window.location.hostname === 'localhost' ||
-             window.location.hostname === '127.0.0.1')
-          ) {
-            addMessage(
-              'agent',
-              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
-            );
-          } else if (response.status === 502) {
-            addMessage(
-              'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
-            );
-          } else {
->>>>>>> Stashed changes
-=======
-
-          if (
-            response.status === 404 &&
-            (window.location.hostname === 'localhost' ||
-             window.location.hostname === '127.0.0.1')
-          ) {
-            addMessage(
-              'agent',
-              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
-            );
-          } else if (response.status === 502) {
-            addMessage(
-              'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
-            );
-          } else {
->>>>>>> Stashed changes
-=======
-
-          if (
-            response.status === 404 &&
-            (window.location.hostname === 'localhost' ||
-             window.location.hostname === '127.0.0.1')
-          ) {
-            addMessage(
-              'agent',
-              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
-            );
-          } else if (response.status === 502) {
-            addMessage(
-              'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
-            );
-          } else {
->>>>>>> Stashed changes
-=======
-
-          if (
-            response.status === 404 &&
-            (window.location.hostname === 'localhost' ||
-             window.location.hostname === '127.0.0.1')
-          ) {
-            addMessage(
-              'agent',
-              '⚠️ **Local Server Warning**: Static servers cannot run Node.js API routes. To test AI locally, run `npx vercel dev` instead of a static server.'
-            );
-          } else if (response.status === 502) {
-            addMessage(
-              'agent',
-              "☕ Our AI brain is taking a quick coffee break. For immediate B2B assistance, Damien is available on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a>."
-            );
-          } else {
->>>>>>> Stashed changes
-            addMessage(
-              'agent',
               "Something went wrong on our end. Please reach out to Damien directly on <a href='https://wa.me/6587977961' target='_blank'>WhatsApp</a> for immediate B2B support."
             );
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
           }
         }
       } catch (error) {
@@ -1549,8 +1445,8 @@ document.addEventListener('DOMContentLoaded', () => {
     renderOptions();
   }
 
-  faqToggle.addEventListener('click', (e) => {
-    e.stopPropagation();
+  faqToggle.addEventListener('click', (event) => {
+    event.stopPropagation();
 
     const isOpen = faqWidget.classList.toggle('open');
 
@@ -1567,8 +1463,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  faqClose.addEventListener('click', (e) => {
-    e.stopPropagation();
+  faqClose.addEventListener('click', (event) => {
+    event.stopPropagation();
     faqWidget.classList.remove('open');
   });
 
@@ -1576,14 +1472,14 @@ document.addEventListener('DOMContentLoaded', () => {
     handleUserMessage(faqUserInput.value);
   });
 
-  faqUserInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
+  faqUserInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
       handleUserMessage(faqUserInput.value);
     }
   });
 
-  document.addEventListener('click', (e) => {
-    if (!faqWidget.contains(e.target) && !faqToggle.contains(e.target)) {
+  document.addEventListener('click', (event) => {
+    if (!faqWidget.contains(event.target) && !faqToggle.contains(event.target)) {
       faqWidget.classList.remove('open');
     }
   });
